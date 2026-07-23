@@ -36,16 +36,24 @@ struct GpuPath {
     size: (u32, u32),
 }
 
-fn open_gpu_path(frame: &Frame, handles: [isize; GPU_BUFFERS], size: (u32, u32)) -> Result<GpuPath, String> {
+fn open_gpu_path(
+    frame: &Frame,
+    handles: [isize; GPU_BUFFERS],
+    size: (u32, u32),
+) -> Result<GpuPath, String> {
     let device = frame.device();
-    let device1: ID3D11Device1 = device.cast().map_err(|e| format!("no ID3D11Device1: {e}"))?;
+    let device1: ID3D11Device1 = device
+        .cast()
+        .map_err(|e| format!("no ID3D11Device1: {e}"))?;
     let mut textures = Vec::with_capacity(GPU_BUFFERS);
     for h in handles {
         let tex: ID3D11Texture2D = unsafe { device1.OpenSharedResource1(HANDLE(h as *mut _)) }
             .map_err(|e| format!("OpenSharedResource1: {e}"))?;
         textures.push(tex);
     }
-    let device5: ID3D11Device5 = device.cast().map_err(|e| format!("no ID3D11Device5: {e}"))?;
+    let device5: ID3D11Device5 = device
+        .cast()
+        .map_err(|e| format!("no ID3D11Device5: {e}"))?;
     let mut fence: Option<ID3D11Fence> = None;
     unsafe { device5.CreateFence(0, D3D11_FENCE_FLAG_NONE, &mut fence) }
         .map_err(|e| format!("CreateFence: {e}"))?;
@@ -54,8 +62,8 @@ fn open_gpu_path(frame: &Frame, handles: [isize; GPU_BUFFERS], size: (u32, u32))
         .device_context()
         .cast()
         .map_err(|e| format!("no ID3D11DeviceContext4: {e}"))?;
-    let event =
-        unsafe { CreateEventW(None, false, false, None) }.map_err(|e| format!("CreateEventW: {e}"))?;
+    let event = unsafe { CreateEventW(None, false, false, None) }
+        .map_err(|e| format!("CreateEventW: {e}"))?;
     Ok(GpuPath {
         textures,
         ctx4,

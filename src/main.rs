@@ -1,4 +1,4 @@
-// Singularity - a drifting black hole over the live desktop.
+// Black Hole Trash - a compact gravitational Recycle Bin for Windows.
 // Desktop captured via Windows.Graphics.Capture; our own window is excluded
 // from capture so we don't feed back into ourselves. Falls back to a test
 // pattern until the first frame.
@@ -16,6 +16,8 @@ use winit::{
     keyboard::{Key, NamedKey},
     window::{Window, WindowBuilder, WindowLevel},
 };
+
+mod platform;
 
 #[cfg(windows)]
 #[path = "capture_windows.rs"]
@@ -69,7 +71,9 @@ pub struct Uniforms {
     pub _pad: [f32; 2],
 }
 
-const DEFAULT_SIZE: f32 = 0.09; // shadow radius, fraction of screen height
+const MIN_TRASH_SIZE: f32 = 0.011;
+const DEFAULT_SIZE: f32 = 0.014; // full visible disk is roughly 80 px at 1080p
+const MAX_TRASH_SIZE: f32 = 0.018;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
@@ -78,23 +82,70 @@ const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
 const PRESETS: [(&str, [f32; 14]); 8] = [
-    ("Inferno",       [ 5500.0, 1.50,  0.35, 1.8,  8.0, 0.90, 0.60, 2.5, 2.2, 1.6, 7.0, 5.0, 1.40, 0.0]),
-    ("Gargantua",     [ 4500.0, 1.52,  0.10, 2.2,  7.0, 0.85, 0.35, 2.0, 1.4, 0.5, 7.0, 5.0, 1.20, 0.0]),
-    ("Quasar",        [15000.0, 1.30,  0.35, 3.0, 14.0, 0.35, 1.00, 4.0, 1.2, 1.3, 8.0, 5.0, 0.80, 0.0]),
-    ("M87* donut",    [ 3800.0, 0.55, -0.30, 2.2,  6.0, 0.45, 0.90, 3.5, 1.6, 0.4, 3.0, 2.5, 1.10, 0.0]),
-    ("Blazar",        [18000.0, 1.05,  0.55, 3.0, 16.0, 0.30, 1.00, 5.0, 1.0, 1.5, 9.0, 6.0, 0.75, 0.0]),
-    ("Face-on ember", [ 6500.0, 0.30,  0.00, 3.0, 10.0, 0.50, 0.80, 2.5, 1.0, 1.1, 7.0, 5.0, 1.00, 0.0]),
-    ("Pure lens",     [ 5500.0, 1.50,  0.35, 1.8,  8.0, 0.00, 1.00, 2.5, 0.0, 1.6, 7.0, 5.0, 1.00, 0.6]),
-    ("Zen",           [ 7000.0, 1.45,  0.15, 3.5,  7.0, 0.40, 0.50, 2.0, 0.5, 0.3, 3.0, 1.5, 0.70, 0.0]),
+    (
+        "Inferno",
+        [
+            5500.0, 1.50, 0.35, 1.8, 8.0, 0.90, 0.60, 2.5, 2.2, 1.6, 7.0, 5.0, 1.40, 0.0,
+        ],
+    ),
+    (
+        "Gargantua",
+        [
+            4500.0, 1.52, 0.10, 2.2, 7.0, 0.85, 0.35, 2.0, 1.4, 0.5, 7.0, 5.0, 1.20, 0.0,
+        ],
+    ),
+    (
+        "Quasar",
+        [
+            15000.0, 1.30, 0.35, 3.0, 14.0, 0.35, 1.00, 4.0, 1.2, 1.3, 8.0, 5.0, 0.80, 0.0,
+        ],
+    ),
+    (
+        "M87* donut",
+        [
+            3800.0, 0.55, -0.30, 2.2, 6.0, 0.45, 0.90, 3.5, 1.6, 0.4, 3.0, 2.5, 1.10, 0.0,
+        ],
+    ),
+    (
+        "Blazar",
+        [
+            18000.0, 1.05, 0.55, 3.0, 16.0, 0.30, 1.00, 5.0, 1.0, 1.5, 9.0, 6.0, 0.75, 0.0,
+        ],
+    ),
+    (
+        "Face-on ember",
+        [
+            6500.0, 0.30, 0.00, 3.0, 10.0, 0.50, 0.80, 2.5, 1.0, 1.1, 7.0, 5.0, 1.00, 0.0,
+        ],
+    ),
+    (
+        "Pure lens",
+        [
+            5500.0, 1.50, 0.35, 1.8, 8.0, 0.00, 1.00, 2.5, 0.0, 1.6, 7.0, 5.0, 1.00, 0.6,
+        ],
+    ),
+    (
+        "Zen",
+        [
+            7000.0, 1.45, 0.15, 3.5, 7.0, 0.40, 0.50, 2.0, 0.5, 0.3, 3.0, 1.5, 0.70, 0.0,
+        ],
+    ),
 ];
 const DEFAULT_PRESET: usize = 1; // Gargantua
 
 // config-file keys for the presets, in PRESETS order
 const PRESET_KEYS: [&str; 8] = [
-    "inferno", "gargantua", "quasar", "m87", "blazar", "ember", "lens", "zen",
+    "inferno",
+    "gargantua",
+    "quasar",
+    "m87",
+    "blazar",
+    "ember",
+    "lens",
+    "zen",
 ];
 
-/// Values parsed from singularity.toml; None = key absent/commented out.
+/// Values parsed from black-hole-trash.toml; None = key absent/commented out.
 #[derive(Clone, Copy, PartialEq, Default)]
 struct FileCfg {
     preset: Option<usize>,
@@ -116,7 +167,9 @@ fn parse_config(text: &str) -> FileCfg {
     let mut cfg = FileCfg::default();
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let (k, v) = (k.trim(), v.trim());
         match k {
             "preset" => cfg.preset = PRESET_KEYS.iter().position(|p| p.eq_ignore_ascii_case(v)),
@@ -139,13 +192,18 @@ fn parse_config(text: &str) -> FileCfg {
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.join("singularity.toml"))
+    Some(
+        std::env::current_exe()
+            .ok()?
+            .parent()?
+            .join("black-hole-trash.toml"),
+    )
 }
 
 // only written from the tray's "Open Config File", which Linux doesn't build
 #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 const DEFAULT_CONFIG: &str = "\
-# Singularity settings. Saved changes apply within a second, no restart.
+# Black Hole Trash settings. Saved changes apply within a second, no restart.
 # Remove the leading # to activate a line; active values take priority
 # over the tray menu until they change again.
 
@@ -153,8 +211,8 @@ const DEFAULT_CONFIG: &str = "\
 #preset = gargantua
 
 # Shadow radius as a fraction of screen height.
-# Tray Small / Medium / Large = 0.06 / 0.09 / 0.14
-#size = 0.09
+# Tray Small / Medium / Large = 0.011 / 0.014 / 0.018
+#size = 0.014
 
 # Wander speed multiplier and horizontal/vertical range (0 to 0.5).
 #drift_speed = 1.0
@@ -173,8 +231,9 @@ const DEFAULT_CONFIG: &str = "\
 # 0 = never check. Takes effect on restart.
 #check_updates = 1
 
-# Placement: hold Ctrl+Shift anywhere and the hole follows your mouse;
-# release to pin it. Tray > Position > Auto drift resumes wandering.
+# Placement: drag the black hole directly with the left mouse button.
+# Ctrl+Shift also moves it to the pointer. Tray > Position > Auto drift
+# resumes wandering.
 # Or pin a fixed spot here (0 to 1, fraction of the combined desktop).
 #pin_x = 0.5
 #pin_y = 0.5
@@ -256,8 +315,8 @@ struct State {
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
-    fps: u32,          // 0 = uncapped (vsync only)
-    spin: f32,         // Kerr spin 0..0.99
+    fps: u32,                                 // 0 = uncapped (vsync only)
+    spin: f32,                                // Kerr spin 0..0.99
     idle_minutes: f32, // 0 = always visible; >0 = appear after this much idle
     appear_start: Option<std::time::Instant>, // grow-in animation anchor
     // hole placement in virtual-desktop pixels: the roam box is the bounding
@@ -303,7 +362,10 @@ impl State {
             if let Some(luid) = default_adapter_luid() {
                 for a in instance.enumerate_adapters(wgpu::Backends::DX12) {
                     if adapter_luid(&a) == Some(luid) {
-                        eprintln!("render: using capture-matched adapter: {}", a.get_info().name);
+                        eprintln!(
+                            "render: using capture-matched adapter: {}",
+                            a.get_info().name
+                        );
                         chosen = Some(a);
                         break;
                     }
@@ -392,7 +454,7 @@ impl State {
             ],
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("singularity.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("black_hole_trash.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -423,7 +485,6 @@ impl State {
             multiview: None,
             cache: None,
         });
-
         let primary_h = monitors
             .first()
             .map(|m| m.size().height as f64)
@@ -648,8 +709,14 @@ impl State {
         let mx = self.roam_size[0] * 0.02;
         let my = self.roam_size[1] * 0.02;
         [
-            p[0].clamp(self.roam_pos[0] + mx, self.roam_pos[0] + self.roam_size[0] - mx),
-            p[1].clamp(self.roam_pos[1] + my, self.roam_pos[1] + self.roam_size[1] - my),
+            p[0].clamp(
+                self.roam_pos[0] + mx,
+                self.roam_pos[0] + self.roam_size[0] - mx,
+            ),
+            p[1].clamp(
+                self.roam_pos[1] + my,
+                self.roam_pos[1] + self.roam_size[1] - my,
+            ),
         ]
     }
 
@@ -732,65 +799,65 @@ impl State {
         }
 
         {
-        let queue = &self.queue;
-        let device = &self.device;
-        let layout = &self.bind_group_layout;
-        let sampler = &self.sampler;
-        let pane = &mut self.panes[i];
+            let queue = &self.queue;
+            let device = &self.device;
+            let layout = &self.bind_group_layout;
+            let sampler = &self.sampler;
+            let pane = &mut self.panes[i];
 
-        // pull the latest desktop frame for this pane
-        let frame = {
-            let g = pane.shared.lock().unwrap();
-            if g.version != pane.last_version && g.width > 0 && g.height > 0 {
-                pane.last_version = g.version;
-                match g.gpu_index {
-                    Some(gi) => {
-                        pane.gpu_current = Some(gi);
-                        pane.has_desktop = true;
-                        None
+            // pull the latest desktop frame for this pane
+            let frame = {
+                let g = pane.shared.lock().unwrap();
+                if g.version != pane.last_version && g.width > 0 && g.height > 0 {
+                    pane.last_version = g.version;
+                    match g.gpu_index {
+                        Some(gi) => {
+                            pane.gpu_current = Some(gi);
+                            pane.has_desktop = true;
+                            None
+                        }
+                        None => {
+                            pane.gpu_current = None;
+                            Some((g.width, g.height, g.data.clone()))
+                        }
                     }
-                    None => {
-                        pane.gpu_current = None;
-                        Some((g.width, g.height, g.data.clone()))
-                    }
+                } else {
+                    None
                 }
-            } else {
-                None
-            }
-        };
-        if let Some((w, h, data)) = frame {
-            if (w, h) != pane.tex_size {
-                pane.desktop_texture = create_desktop_texture(device, w, h);
-                pane.bind_group = make_bind_group(
-                    device,
-                    layout,
-                    &pane.uniform_buf,
-                    &pane.desktop_texture,
-                    sampler,
+            };
+            if let Some((w, h, data)) = frame {
+                if (w, h) != pane.tex_size {
+                    pane.desktop_texture = create_desktop_texture(device, w, h);
+                    pane.bind_group = make_bind_group(
+                        device,
+                        layout,
+                        &pane.uniform_buf,
+                        &pane.desktop_texture,
+                        sampler,
+                    );
+                    pane.tex_size = (w, h);
+                }
+                queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &pane.desktop_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &data,
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(w * 4),
+                        rows_per_image: Some(h),
+                    },
+                    wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
                 );
-                pane.tex_size = (w, h);
+                pane.has_desktop = true;
             }
-            queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &pane.desktop_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &data,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(w * 4),
-                    rows_per_image: Some(h),
-                },
-                wgpu::Extent3d {
-                    width: w,
-                    height: h,
-                    depth_or_array_layers: 1,
-                },
-            );
-            pane.has_desktop = true;
-        }
         } // release the pane borrow before the shared-self uniform math
 
         let u = self.pane_uniforms(i);
@@ -810,13 +877,14 @@ impl State {
             look: self.current_look(),
             // the hole keeps one physical size everywhere: radius is relative
             // to the primary monitor's height, rescaled per pane
-            hole_radius: self.hole_radius * self.appear_factor()
+            hole_radius: self.hole_radius
+                * self.appear_factor()
                 * (self.primary_h as f32 / pane.mon_size.height.max(1) as f32),
             center: [
-                ((self.center_px[0] - pane.mon_pos.x as f64)
-                    / pane.mon_size.width.max(1) as f64) as f32,
-                ((self.center_px[1] - pane.mon_pos.y as f64)
-                    / pane.mon_size.height.max(1) as f64) as f32,
+                ((self.center_px[0] - pane.mon_pos.x as f64) / pane.mon_size.width.max(1) as f64)
+                    as f32,
+                ((self.center_px[1] - pane.mon_pos.y as f64) / pane.mon_size.height.max(1) as f64)
+                    as f32,
             ],
             spin: self.spin,
             _pad: [0.0; 2],
@@ -832,8 +900,9 @@ impl State {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("encoder") });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("encoder"),
+        });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
@@ -884,8 +953,8 @@ struct Shell {
 
 /// Manual borderless "fullscreen" per monitor: undecorated topmost windows
 /// sized and placed by hand. winit's Fullscreen::Borderless state makes DXGI
-/// swapchain creation fail with DXGI_ERROR_INVALID_CALL (verified by
-/// examples/dx12_probe.rs), while a manually monitor-sized window works.
+/// swapchain creation fail with DXGI_ERROR_INVALID_CALL in compatibility
+/// testing, while a manually monitor-sized window works.
 fn make_shells(
     instance: &wgpu::Instance,
     target: &EventLoopWindowTarget<()>,
@@ -902,7 +971,7 @@ fn make_shells(
         let (pos, size) = (m.position(), m.size());
         let window = Arc::new(
             WindowBuilder::new()
-                .with_title("Singularity")
+                .with_title("Black Hole Trash")
                 .with_decorations(false)
                 .with_window_level(WindowLevel::AlwaysOnTop)
                 .with_inner_size(size)
@@ -1116,10 +1185,16 @@ const RELEASES_URL: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/releases/late
 
 #[cfg(any(windows, target_os = "macos"))]
 fn fetch_latest_version() -> Option<String> {
-    const API: &str =
-        "https://api.github.com/repos/GreenScreen410/singularity/releases/latest";
+    const API: &str = "https://api.github.com/repos/rrrjqy66/BlackHoleTrash/releases/latest";
     let mut cmd = std::process::Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
-    cmd.args(["-s", "--max-time", "10", "-H", "User-Agent: singularity", API]);
+    cmd.args([
+        "-s",
+        "--max-time",
+        "10",
+        "-H",
+        "User-Agent: black-hole-trash",
+        API,
+    ]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1130,7 +1205,11 @@ fn fetch_latest_version() -> Option<String> {
     // extract "tag_name": "x.y.z" without pulling in a JSON parser
     let rest = &body[body.find("\"tag_name\"")?..];
     let after = rest[rest.find(':')? + 1..].trim_start().strip_prefix('"')?;
-    Some(after[..after.find('"')?].trim_start_matches('v').to_string())
+    Some(
+        after[..after.find('"')?]
+            .trim_start_matches('v')
+            .to_string(),
+    )
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -1219,7 +1298,10 @@ fn idle_seconds() -> f32 {
     extern "system" {
         fn GetTickCount() -> u32;
     }
-    let mut lii = LastInputInfo { cb_size: 8, dw_time: 0 };
+    let mut lii = LastInputInfo {
+        cb_size: 8,
+        dw_time: 0,
+    };
     unsafe {
         if GetLastInputInfo(&mut lii) != 0 {
             GetTickCount().wrapping_sub(lii.dw_time) as f32 / 1000.0
@@ -1269,17 +1351,29 @@ fn tray_icon_rgba(size: u32) -> Vec<u8> {
 
 // sub-option values, shared by the tray menu and its handler
 #[cfg(any(windows, target_os = "macos"))]
-const SIZES: [(&str, f32); 3] = [("Small", 0.06), ("Medium", 0.09), ("Large", 0.14)];
+const SIZES: [(&str, f32); 3] = [
+    ("Small", MIN_TRASH_SIZE),
+    ("Medium", DEFAULT_SIZE),
+    ("Large", MAX_TRASH_SIZE),
+];
 #[cfg(any(windows, target_os = "macos"))]
 const SPEEDS: [(&str, f32); 3] = [("Slow", 0.4), ("Normal", 1.0), ("Fast", 2.2)];
 #[cfg(any(windows, target_os = "macos"))]
 const FPS_OPTS: [(&str, u32); 3] = [("30", 30), ("60", 60), ("Unlimited", 0)];
 #[cfg(any(windows, target_os = "macos"))]
-const IDLE_OPTS: [(&str, f32); 4] =
-    [("Off", 0.0), ("1 min", 1.0), ("5 min", 5.0), ("10 min", 10.0)];
+const IDLE_OPTS: [(&str, f32); 4] = [
+    ("Off", 0.0),
+    ("1 min", 1.0),
+    ("5 min", 5.0),
+    ("10 min", 10.0),
+];
 #[cfg(any(windows, target_os = "macos"))]
-const SPIN_OPTS: [(&str, f32); 4] =
-    [("Off", 0.0), ("Medium", 0.6), ("High", 0.9), ("Extreme", 0.98)];
+const SPIN_OPTS: [(&str, f32); 4] = [
+    ("Off", 0.0),
+    ("Medium", 0.6),
+    ("High", 0.9),
+    ("Extreme", 0.98),
+];
 
 #[cfg(any(windows, target_os = "macos"))]
 struct Tray {
@@ -1356,7 +1450,11 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
     let icon = Icon::from_rgba(tray_icon_rgba(32), 32, 32).unwrap();
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu.clone()))
-        .with_tooltip(concat!("Singularity ", env!("CARGO_PKG_VERSION"), " - right-click for options"))
+        .with_tooltip(concat!(
+            "Black Hole Trash ",
+            env!("CARGO_PKG_VERSION"),
+            " - right-click for options"
+        ))
         .with_icon(icon)
         .build()
         .unwrap();
@@ -1388,14 +1486,14 @@ fn main() {
         use windows::core::w;
         use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
         use windows::Win32::System::Threading::{CreateEventW, CreateMutexW, ResetEvent, SetEvent};
-        let ev = unsafe { CreateEventW(None, true, false, w!("Local\\SingularityQuit")) }
+        let ev = unsafe { CreateEventW(None, true, false, w!("Local\\BlackHoleTrashQuit")) }
             .expect("event");
         let mut owned = false;
         for attempt in 0..28 {
-            let h = unsafe { CreateMutexW(None, false, w!("Local\\SingularityOverlay")) };
+            let h = unsafe { CreateMutexW(None, false, w!("Local\\BlackHoleTrashOverlay")) };
             if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
                 if let Ok(h) = h {
-                    std::mem::forget(h); // held for the lifetime of the process
+                    let _overlay_mutex = h; // raw handle remains open for this process
                 }
                 owned = true;
                 break;
@@ -1475,7 +1573,7 @@ fn main() {
         state.set_preset(i);
     }
     if let Some(v) = startup_cfg.size {
-        state.hole_radius = v;
+        state.hole_radius = v.clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
     }
     if let Some(v) = startup_cfg.drift_speed {
         state.drift_speed = v;
@@ -1502,7 +1600,26 @@ fn main() {
             state.roam_pos[1] + state.roam_size[1] * y.clamp(0.0, 1.0) as f64,
         ]);
     }
+    // A recycle target must stay under the pointer throughout an OLE drag.
+    // Existing pin_x/pin_y configuration still wins; otherwise pin the
+    // black hole at its initial centre instead of allowing it to drift away.
+    if state.pinned_px.is_none() {
+        state.pinned_px = Some(state.center_px);
+    }
     let mut prev_cfg = startup_cfg;
+
+    #[cfg(windows)]
+    let (platform_sender, platform_events) = platform::windows::event_channel();
+    #[cfg(windows)]
+    let mut drop_window = match platform::windows::DropWindow::new(platform_sender.clone()) {
+        Ok(window) => Some(window),
+        Err(error) => {
+            log::error!("OLE drop target unavailable: {error}");
+            None
+        }
+    };
+    #[cfg(windows)]
+    let mut active_generation = 0u64;
 
     // ui-side trackers for the event loop
     #[cfg_attr(not(any(windows, target_os = "macos")), allow(unused))]
@@ -1514,9 +1631,8 @@ fn main() {
     #[cfg(windows)]
     let mut last_prtscn: Option<std::time::Instant> = None;
     #[cfg(windows)]
-    let mut last_clip_seq: u32 = unsafe {
-        windows::Win32::System::DataExchange::GetClipboardSequenceNumber()
-    };
+    let mut last_clip_seq: u32 =
+        unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
     // full virtual desktop bounds (all monitors), what PrtScn captures
     #[cfg(windows)]
     let (virtual_origin, virtual_size) = {
@@ -1538,399 +1654,430 @@ fn main() {
     };
 
     event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop
-        .run(move |event, elwt| match event {
-            // NSStatusItem must be created after NSApplication is running on
-            // macOS; StartCause::Init is the first moment that is true.
-            Event::NewEvents(winit::event::StartCause::Init) => {
-                #[cfg(any(windows, target_os = "macos"))]
-                {
-                    let mut labels = vec!["All monitors".to_string()];
-                    labels.extend(monitors.iter().enumerate().map(|(i, m)| {
-                        format!("{}: {}x{}", i + 1, m.size().width, m.size().height)
-                    }));
-                    let checked = match current_sel {
-                        None => 0,
-                        Some(i) => i + 1,
-                    };
-                    tray = Some(build_tray(&labels, checked, state.pinned_px.is_some()));
-                }
-            }
-            Event::WindowEvent { event, window_id } => {
-                let Some(i) = state.panes.iter().position(|p| p.window.id() == window_id)
-                else {
-                    return;
+    let run_result = event_loop.run(move |event, elwt| match event {
+        // NSStatusItem must be created after NSApplication is running on
+        // macOS; StartCause::Init is the first moment that is true.
+        Event::NewEvents(winit::event::StartCause::Init) => {
+            #[cfg(any(windows, target_os = "macos"))]
+            {
+                let mut labels = vec!["All monitors".to_string()];
+                labels.extend(
+                    monitors
+                        .iter()
+                        .enumerate()
+                        .map(|(i, m)| format!("{}: {}x{}", i + 1, m.size().width, m.size().height)),
+                );
+                let checked = match current_sel {
+                    None => 0,
+                    Some(i) => i + 1,
                 };
-                match event {
-                    WindowEvent::CloseRequested => elwt.exit(),
-                    WindowEvent::KeyboardInput {
-                        event:
-                            KeyEvent {
-                                logical_key: Key::Named(NamedKey::Escape),
-                                state: ElementState::Pressed,
-                                ..
-                            },
-                        ..
-                    } => elwt.exit(),
-                    WindowEvent::Resized(new_size) => state.resize_pane(i, new_size),
-                    WindowEvent::RedrawRequested => {
-                        state.update_pane(i);
-                        match state.render_pane(i) {
-                            Ok(()) => {}
-                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                                let device = &state.device;
-                                let pane = &state.panes[i];
-                                pane.surface.configure(device, &pane.config);
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                            Err(e) => eprintln!("render error: {e:?}"),
+                tray = Some(build_tray(&labels, checked, state.pinned_px.is_some()));
+            }
+        }
+        Event::WindowEvent { event, window_id } => {
+            let Some(i) = state.panes.iter().position(|p| p.window.id() == window_id) else {
+                return;
+            };
+            match event {
+                WindowEvent::CloseRequested => elwt.exit(),
+                WindowEvent::KeyboardInput {
+                    event:
+                        KeyEvent {
+                            logical_key: Key::Named(NamedKey::Escape),
+                            state: ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => elwt.exit(),
+                WindowEvent::Resized(new_size) => state.resize_pane(i, new_size),
+                WindowEvent::RedrawRequested => {
+                    state.update_pane(i);
+                    match state.render_pane(i) {
+                        Ok(()) => {}
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            let device = &state.device;
+                            let pane = &state.panes[i];
+                            pane.surface.configure(device, &pane.config);
                         }
+                        Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                        Err(e) => eprintln!("render error: {e:?}"),
                     }
-                    _ => {}
+                }
+                _ => {}
+            }
+        }
+        Event::AboutToWait => {
+            // a newer launch asked us to hand over the overlay
+            #[cfg(windows)]
+            {
+                use windows::Win32::Foundation::HANDLE;
+                use windows::Win32::System::Threading::WaitForSingleObject;
+                if unsafe { WaitForSingleObject(HANDLE(quit_event as *mut _), 0) }.0 == 0 {
+                    eprintln!("handover requested by a newer launch; exiting");
+                    elwt.exit();
                 }
             }
-            Event::AboutToWait => {
-                // a newer launch asked us to hand over the overlay
-                #[cfg(windows)]
-                {
-                    use windows::Win32::Foundation::HANDLE;
-                    use windows::Win32::System::Threading::WaitForSingleObject;
-                    if unsafe {
-                        WaitForSingleObject(HANDLE(quit_event as *mut _), 0)
-                    }
-                    .0 == 0
-                    {
-                        eprintln!("handover requested by a newer launch; exiting");
-                        elwt.exit();
-                    }
-                }
-                state.tick_center();
+            state.tick_center();
 
-                // Visibility state machine, per pane. This must live HERE,
-                // not in the render path: a hidden window gets no WM_PAINT,
-                // so a render-side reveal would deadlock into invisibility.
-                //
-                // booted:  that pane's first capture frame arrived (or 3s)
-                // wanted:  always, or only after idle_minutes without input
-                let waited = state.start.elapsed().as_secs_f32();
-                let idle_mode = state.idle_minutes > 0.0;
-                let wanted = !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
-                let any_visible = state.panes.iter().any(|p| p.visible);
-                for i in 0..state.panes.len() {
-                    let ready = { state.panes[i].shared.lock().unwrap().width > 0 };
-                    let booted = ready || waited > 3.0;
-                    if booted && !ready && !boot_warned {
-                        boot_warned = true;
-                        eprintln!(
-                            "warning: no capture frame after {waited:.1}s - \
-                             showing test pattern; check 'capture:' messages above"
-                        );
-                    }
-                    let show = wanted && booted;
-                    if show && !state.panes[i].visible {
-                        if idle_mode && !any_visible {
-                            // grow in from nothing when appearing out of idle
-                            state.appear_start = Some(std::time::Instant::now());
+            #[cfg(windows)]
+            {
+                while let Ok(event) = platform_events.try_recv() {
+                    use platform::windows::PlatformEvent;
+                    match event {
+                        PlatformEvent::MoveRequested { point } => {
+                            let pinned = state.clamp_roam(point);
+                            state.center_px = pinned;
+                            state.pinned_px = Some(pinned);
                         }
-                        state.update_pane(i);
-                        let _ = state.render_pane(i); // pre-paint while hidden
-                        let pane = &mut state.panes[i];
-                        pane.window.set_visible(true);
-                        // re-assert overlay traits after the hidden start
-                        pane.window.set_outer_position(pane.mon_pos);
-                        let _ = pane.window.request_inner_size(pane.mon_size);
-                        pane.window.set_window_level(WindowLevel::AlwaysOnTop);
-                        pane.visible = true;
-                    } else if !show && state.panes[i].visible {
-                        // any input dismisses the screensaver instantly
-                        let pane = &mut state.panes[i];
-                        pane.window.set_visible(false);
-                        pane.visible = false;
-                    }
-                }
-
-                // PrtScn clipboard fix: when a full-screen screenshot lands
-                // on the clipboard shortly after PrtScn, composite the hole
-                // into it (the capture exclusion keeps it out of the original)
-                #[cfg(windows)]
-                {
-                    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
-                    use windows::Win32::UI::Input::KeyboardAndMouse::{
-                        GetAsyncKeyState, VK_SNAPSHOT,
-                    };
-                    let down = unsafe { GetAsyncKeyState(VK_SNAPSHOT.0 as i32) } as u16;
-                    if down & 0x8001 != 0 {
-                        last_prtscn = Some(std::time::Instant::now());
-                    }
-                    let seq = unsafe { GetClipboardSequenceNumber() };
-                    if seq != last_clip_seq {
-                        last_clip_seq = seq;
-                        let recent =
-                            last_prtscn.is_some_and(|t| t.elapsed().as_secs_f32() < 10.0);
-                        if fix_screenshots && recent && state.panes.iter().any(|p| p.visible) {
-                            let shots: Vec<screenshot_fix::PaneShot> = state
-                                .panes
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, p)| p.visible)
-                                .map(|(i, p)| screenshot_fix::PaneShot {
-                                    pos: (p.mon_pos.x, p.mon_pos.y),
-                                    size: (p.mon_size.width, p.mon_size.height),
-                                    uniforms: state.pane_uniforms(i),
-                                })
-                                .collect();
-                            for sh in &shots {
-                                eprintln!(
-                                    "screenshot: pane at ({},{}) {}x{} center=({:.3},{:.3}) r={:.3}",
-                                    sh.pos.0, sh.pos.1, sh.size.0, sh.size.1,
-                                    sh.uniforms.center[0], sh.uniforms.center[1],
-                                    sh.uniforms.hole_radius
+                        PlatformEvent::Dropped {
+                            generation, paths, ..
+                        } => {
+                            active_generation = generation;
+                            platform::windows::recycle_async(
+                                generation,
+                                paths,
+                                platform_sender.clone(),
+                            );
+                        }
+                        PlatformEvent::RecycleFinished(result)
+                            if result.generation == active_generation =>
+                        {
+                            if result.succeeded {
+                                log::info!(
+                                    "moved {} item(s) to the Recycle Bin",
+                                    result.paths.len()
                                 );
-                            }
-                            match screenshot_fix::try_fix(
-                                &state.device,
-                                &state.queue,
-                                &state.pipeline,
-                                &state.bind_group_layout,
-                                &state.sampler,
-                                state.format,
-                                virtual_origin,
-                                virtual_size,
-                                &shots,
-                            ) {
-                                Ok(true) => {
-                                    eprintln!(
-                                        "screenshot: hole composited into the clipboard image"
-                                    );
-                                    // our own write bumped the sequence
-                                    last_clip_seq =
-                                        unsafe { GetClipboardSequenceNumber() };
-                                    last_prtscn = None;
-                                }
-                                Ok(false) => {}
-                                Err(e) => eprintln!("screenshot: fix failed: {e}"),
-                            }
-                        }
-                    }
-                }
-
-                // update-check result: surface it as the first menu entry
-                #[cfg(any(windows, target_os = "macos"))]
-                if update_item.is_none() {
-                    if let (Some(t), Some(ver)) =
-                        (&tray, update_available.lock().unwrap().clone())
-                    {
-                        let item = tray_icon::menu::MenuItem::new(
-                            format!("Update available: {ver}"),
-                            true,
-                            None,
-                        );
-                        let _ = t.menu.insert(&item, 0);
-                        let _ = t
-                            .menu
-                            .insert(&tray_icon::menu::PredefinedMenuItem::separator(), 1);
-                        update_item = Some(item);
-                    }
-                }
-                // tray menu events arrive on a global channel; poll each tick
-                #[cfg(any(windows, target_os = "macos"))]
-                if let Some(t) = &tray {
-                    while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
-                        if let Some(ui) = &update_item {
-                            if &ev.id == ui.id() {
-                                open_url(RELEASES_URL);
-                                continue;
-                            }
-                        }
-                        let check_one = |items: &[tray_icon::menu::CheckMenuItem], idx: usize| {
-                            for (j, it) in items.iter().enumerate() {
-                                it.set_checked(j == idx);
-                            }
-                        };
-                        if ev.id == t.quit_id {
-                            elwt.exit();
-                        } else if ev.id == t.open_cfg_id {
-                            if let Some(path) = &cfg_path {
-                                ensure_config_file(path);
-                                #[cfg(windows)]
-                                let _ = std::process::Command::new("notepad").arg(path).spawn();
-                                #[cfg(target_os = "macos")]
-                                let _ = std::process::Command::new("open")
-                                    .arg("-t")
-                                    .arg(path)
-                                    .spawn();
-                            }
-                        } else if let Some(idx) =
-                            t.presets.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.set_preset(idx);
-                            check_one(&t.presets, idx);
-                        } else if let Some(idx) = t.sizes.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.hole_radius = SIZES[idx].1;
-                            check_one(&t.sizes, idx);
-                        } else if let Some(idx) =
-                            t.speeds.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.drift_speed = SPEEDS[idx].1;
-                            check_one(&t.speeds, idx);
-                        } else if let Some(idx) = t.fps.iter().position(|it| it.id() == &ev.id) {
-                            state.fps = FPS_OPTS[idx].1;
-                            check_one(&t.fps, idx);
-                        } else if let Some(idx) = t.idles.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.idle_minutes = IDLE_OPTS[idx].1;
-                            check_one(&t.idles, idx);
-                        } else if let Some(idx) = t.spins.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.spin = SPIN_OPTS[idx].1;
-                            check_one(&t.spins, idx);
-                        } else if let Some(idx) =
-                            t.positions.iter().position(|it| it.id() == &ev.id)
-                        {
-                            state.pinned_px = if idx == 1 {
-                                Some(state.center_px)
                             } else {
-                                None
-                            };
-                            check_one(&t.positions, idx);
-                        } else if let Some(idx) =
-                            t.monitors.iter().position(|it| it.id() == &ev.id)
-                        {
-                            let sel = if idx == 0 { None } else { Some(idx - 1) };
-                            if sel != current_sel {
-                                state.set_selection(elwt, &monitors, sel);
-                                current_sel = sel;
+                                log::error!(
+                                    "recycle rejected for {} item(s): {}",
+                                    result.paths.len(),
+                                    result
+                                        .message
+                                        .as_deref()
+                                        .unwrap_or("Windows Shell aborted the operation")
+                                );
+                                platform::windows::show_recycle_failure(&result);
                             }
-                            check_one(&t.monitors, idx);
                         }
-                    }
-                    // placement hotkey pins the hole; mirror that in the menu
-                    let now_pinned = state.pinned_px.is_some();
-                    if now_pinned != tray_pinned_ui {
-                        tray_pinned_ui = now_pinned;
-                        for (j, it) in t.positions.iter().enumerate() {
-                            it.set_checked((j == 1) == now_pinned);
-                        }
+                        PlatformEvent::RecycleFinished(_) => {}
+                        PlatformEvent::DragEntered { .. }
+                        | PlatformEvent::DragMoved { .. }
+                        | PlatformEvent::DragLeft { .. } => {}
                     }
                 }
 
-                // config-file hot-reload: poll mtime ~1/s, apply only fields
-                // whose value changed since the last read (so the tray keeps
-                // authority over anything the file doesn't change)
-                if last_cfg_check.elapsed().as_secs_f32() > 1.0 {
-                    last_cfg_check = std::time::Instant::now();
-                    if let Some(path) = &cfg_path {
-                        if let Ok(modified) =
-                            std::fs::metadata(path).and_then(|m| m.modified())
-                        {
-                            if cfg_mtime != Some(modified) {
-                                cfg_mtime = Some(modified);
-                                if let Ok(text) = std::fs::read_to_string(path) {
-                                    let cfg = parse_config(&text);
-                                    if cfg.preset != prev_cfg.preset {
-                                        if let Some(i) = cfg.preset {
-                                            state.set_preset(i);
-                                            #[cfg(any(windows, target_os = "macos"))]
-                                            if let Some(t) = &tray {
-                                                for (j, it) in t.presets.iter().enumerate() {
-                                                    it.set_checked(j == i);
-                                                }
+                let overlay_visible = state.panes.iter().any(|pane| pane.visible);
+                if let Some(window) = &mut drop_window {
+                    window.set_center(state.center_px);
+                    window.set_enabled(state.pinned_px.is_some() && overlay_visible);
+                }
+            }
+
+            // Visibility state machine, per pane. This must live HERE,
+            // not in the render path: a hidden window gets no WM_PAINT,
+            // so a render-side reveal would deadlock into invisibility.
+            //
+            // booted:  that pane's first capture frame arrived (or 3s)
+            // wanted:  always, or only after idle_minutes without input
+            let waited = state.start.elapsed().as_secs_f32();
+            let idle_mode = state.idle_minutes > 0.0;
+            let wanted = !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
+            let any_visible = state.panes.iter().any(|p| p.visible);
+            for i in 0..state.panes.len() {
+                let ready = { state.panes[i].shared.lock().unwrap().width > 0 };
+                let booted = ready || waited > 3.0;
+                if booted && !ready && !boot_warned {
+                    boot_warned = true;
+                    eprintln!(
+                        "warning: no capture frame after {waited:.1}s - \
+                             showing test pattern; check 'capture:' messages above"
+                    );
+                }
+                let show = wanted && booted;
+                if show && !state.panes[i].visible {
+                    if idle_mode && !any_visible {
+                        // grow in from nothing when appearing out of idle
+                        state.appear_start = Some(std::time::Instant::now());
+                    }
+                    state.update_pane(i);
+                    let _ = state.render_pane(i); // pre-paint while hidden
+                    let pane = &mut state.panes[i];
+                    pane.window.set_visible(true);
+                    // re-assert overlay traits after the hidden start
+                    pane.window.set_outer_position(pane.mon_pos);
+                    let _ = pane.window.request_inner_size(pane.mon_size);
+                    pane.window.set_window_level(WindowLevel::AlwaysOnTop);
+                    pane.visible = true;
+                } else if !show && state.panes[i].visible {
+                    // any input dismisses the screensaver instantly
+                    let pane = &mut state.panes[i];
+                    pane.window.set_visible(false);
+                    pane.visible = false;
+                }
+            }
+
+            // PrtScn clipboard fix: when a full-screen screenshot lands
+            // on the clipboard shortly after PrtScn, composite the hole
+            // into it (the capture exclusion keeps it out of the original)
+            #[cfg(windows)]
+            {
+                use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+                use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SNAPSHOT};
+                let down = unsafe { GetAsyncKeyState(VK_SNAPSHOT.0 as i32) } as u16;
+                if down & 0x8001 != 0 {
+                    last_prtscn = Some(std::time::Instant::now());
+                }
+                let seq = unsafe { GetClipboardSequenceNumber() };
+                if seq != last_clip_seq {
+                    last_clip_seq = seq;
+                    let recent = last_prtscn.is_some_and(|t| t.elapsed().as_secs_f32() < 10.0);
+                    if fix_screenshots && recent && state.panes.iter().any(|p| p.visible) {
+                        let shots: Vec<screenshot_fix::PaneShot> = state
+                            .panes
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| p.visible)
+                            .map(|(i, p)| screenshot_fix::PaneShot {
+                                pos: (p.mon_pos.x, p.mon_pos.y),
+                                size: (p.mon_size.width, p.mon_size.height),
+                                uniforms: state.pane_uniforms(i),
+                            })
+                            .collect();
+                        for sh in &shots {
+                            eprintln!(
+                                "screenshot: pane at ({},{}) {}x{} center=({:.3},{:.3}) r={:.3}",
+                                sh.pos.0,
+                                sh.pos.1,
+                                sh.size.0,
+                                sh.size.1,
+                                sh.uniforms.center[0],
+                                sh.uniforms.center[1],
+                                sh.uniforms.hole_radius
+                            );
+                        }
+                        match screenshot_fix::try_fix(
+                            &state.device,
+                            &state.queue,
+                            &state.pipeline,
+                            &state.bind_group_layout,
+                            &state.sampler,
+                            state.format,
+                            virtual_origin,
+                            virtual_size,
+                            &shots,
+                        ) {
+                            Ok(true) => {
+                                eprintln!("screenshot: hole composited into the clipboard image");
+                                // our own write bumped the sequence
+                                last_clip_seq = unsafe { GetClipboardSequenceNumber() };
+                                last_prtscn = None;
+                            }
+                            Ok(false) => {}
+                            Err(e) => eprintln!("screenshot: fix failed: {e}"),
+                        }
+                    }
+                }
+            }
+
+            // update-check result: surface it as the first menu entry
+            #[cfg(any(windows, target_os = "macos"))]
+            if update_item.is_none() {
+                if let (Some(t), Some(ver)) = (&tray, update_available.lock().unwrap().clone()) {
+                    let item = tray_icon::menu::MenuItem::new(
+                        format!("Update available: {ver}"),
+                        true,
+                        None,
+                    );
+                    let _ = t.menu.insert(&item, 0);
+                    let _ = t
+                        .menu
+                        .insert(&tray_icon::menu::PredefinedMenuItem::separator(), 1);
+                    update_item = Some(item);
+                }
+            }
+            // tray menu events arrive on a global channel; poll each tick
+            #[cfg(any(windows, target_os = "macos"))]
+            if let Some(t) = &tray {
+                while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+                    if let Some(ui) = &update_item {
+                        if &ev.id == ui.id() {
+                            open_url(RELEASES_URL);
+                            continue;
+                        }
+                    }
+                    let check_one = |items: &[tray_icon::menu::CheckMenuItem], idx: usize| {
+                        for (j, it) in items.iter().enumerate() {
+                            it.set_checked(j == idx);
+                        }
+                    };
+                    if ev.id == t.quit_id {
+                        elwt.exit();
+                    } else if ev.id == t.open_cfg_id {
+                        if let Some(path) = &cfg_path {
+                            ensure_config_file(path);
+                            #[cfg(windows)]
+                            let _ = std::process::Command::new("notepad").arg(path).spawn();
+                            #[cfg(target_os = "macos")]
+                            let _ = std::process::Command::new("open")
+                                .arg("-t")
+                                .arg(path)
+                                .spawn();
+                        }
+                    } else if let Some(idx) = t.presets.iter().position(|it| it.id() == &ev.id) {
+                        state.set_preset(idx);
+                        check_one(&t.presets, idx);
+                    } else if let Some(idx) = t.sizes.iter().position(|it| it.id() == &ev.id) {
+                        state.hole_radius = SIZES[idx].1;
+                        check_one(&t.sizes, idx);
+                    } else if let Some(idx) = t.speeds.iter().position(|it| it.id() == &ev.id) {
+                        state.drift_speed = SPEEDS[idx].1;
+                        check_one(&t.speeds, idx);
+                    } else if let Some(idx) = t.fps.iter().position(|it| it.id() == &ev.id) {
+                        state.fps = FPS_OPTS[idx].1;
+                        check_one(&t.fps, idx);
+                    } else if let Some(idx) = t.idles.iter().position(|it| it.id() == &ev.id) {
+                        state.idle_minutes = IDLE_OPTS[idx].1;
+                        check_one(&t.idles, idx);
+                    } else if let Some(idx) = t.spins.iter().position(|it| it.id() == &ev.id) {
+                        state.spin = SPIN_OPTS[idx].1;
+                        check_one(&t.spins, idx);
+                    } else if let Some(idx) = t.positions.iter().position(|it| it.id() == &ev.id) {
+                        state.pinned_px = if idx == 1 {
+                            Some(state.center_px)
+                        } else {
+                            None
+                        };
+                        check_one(&t.positions, idx);
+                    } else if let Some(idx) = t.monitors.iter().position(|it| it.id() == &ev.id) {
+                        let sel = if idx == 0 { None } else { Some(idx - 1) };
+                        if sel != current_sel {
+                            state.set_selection(elwt, &monitors, sel);
+                            current_sel = sel;
+                        }
+                        check_one(&t.monitors, idx);
+                    }
+                }
+                // placement hotkey pins the hole; mirror that in the menu
+                let now_pinned = state.pinned_px.is_some();
+                if now_pinned != tray_pinned_ui {
+                    tray_pinned_ui = now_pinned;
+                    for (j, it) in t.positions.iter().enumerate() {
+                        it.set_checked((j == 1) == now_pinned);
+                    }
+                }
+            }
+
+            // config-file hot-reload: poll mtime ~1/s, apply only fields
+            // whose value changed since the last read (so the tray keeps
+            // authority over anything the file doesn't change)
+            if last_cfg_check.elapsed().as_secs_f32() > 1.0 {
+                last_cfg_check = std::time::Instant::now();
+                if let Some(path) = &cfg_path {
+                    if let Ok(modified) = std::fs::metadata(path).and_then(|m| m.modified()) {
+                        if cfg_mtime != Some(modified) {
+                            cfg_mtime = Some(modified);
+                            if let Ok(text) = std::fs::read_to_string(path) {
+                                let cfg = parse_config(&text);
+                                if cfg.preset != prev_cfg.preset {
+                                    if let Some(i) = cfg.preset {
+                                        state.set_preset(i);
+                                        #[cfg(any(windows, target_os = "macos"))]
+                                        if let Some(t) = &tray {
+                                            for (j, it) in t.presets.iter().enumerate() {
+                                                it.set_checked(j == i);
                                             }
                                         }
                                     }
-                                    if cfg.size != prev_cfg.size {
-                                        state.hole_radius = cfg.size.unwrap_or(DEFAULT_SIZE);
-                                    }
-                                    if cfg.drift_speed != prev_cfg.drift_speed {
-                                        state.drift_speed =
-                                            cfg.drift_speed.unwrap_or(DEFAULT_DRIFT_SPEED);
-                                    }
-                                    if cfg.drift_x != prev_cfg.drift_x {
-                                        state.drift_x = cfg.drift_x.unwrap_or(DEFAULT_DRIFT_X);
-                                    }
-                                    if cfg.drift_y != prev_cfg.drift_y {
-                                        state.drift_y = cfg.drift_y.unwrap_or(DEFAULT_DRIFT_Y);
-                                    }
-                                    if cfg.fps != prev_cfg.fps {
-                                        state.fps = cfg.fps.unwrap_or(0);
-                                    }
-                                    if cfg.idle_minutes != prev_cfg.idle_minutes {
-                                        state.idle_minutes = cfg.idle_minutes.unwrap_or(0.0);
-                                    }
-                                    if cfg.spin != prev_cfg.spin {
-                                        state.spin =
-                                            cfg.spin.unwrap_or(0.0).clamp(0.0, 0.98);
-                                    }
-                                    if cfg.pin_x != prev_cfg.pin_x || cfg.pin_y != prev_cfg.pin_y
-                                    {
-                                        state.pinned_px = match (cfg.pin_x, cfg.pin_y) {
-                                            (Some(x), Some(y)) => Some([
-                                                state.roam_pos[0]
-                                                    + state.roam_size[0]
-                                                        * x.clamp(0.0, 1.0) as f64,
-                                                state.roam_pos[1]
-                                                    + state.roam_size[1]
-                                                        * y.clamp(0.0, 1.0) as f64,
-                                            ]),
-                                            _ => None,
-                                        };
-                                    }
-                                    #[cfg(windows)]
-                                    if cfg.fix_screenshots != prev_cfg.fix_screenshots {
-                                        fix_screenshots =
-                                            cfg.fix_screenshots.unwrap_or(1) != 0;
-                                    }
-                                    if cfg.monitor != prev_cfg.monitor {
-                                        let sel = sel_from_cfg(cfg.monitor);
-                                        if sel != current_sel {
-                                            state.set_selection(elwt, &monitors, sel);
-                                            current_sel = sel;
-                                            #[cfg(any(windows, target_os = "macos"))]
-                                            if let Some(t) = &tray {
-                                                let checked = match current_sel {
-                                                    None => 0,
-                                                    Some(i) => i + 1,
-                                                };
-                                                for (j, it) in t.monitors.iter().enumerate() {
-                                                    it.set_checked(j == checked);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    prev_cfg = cfg;
                                 }
+                                if cfg.size != prev_cfg.size {
+                                    state.hole_radius = cfg
+                                        .size
+                                        .unwrap_or(DEFAULT_SIZE)
+                                        .clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
+                                }
+                                if cfg.drift_speed != prev_cfg.drift_speed {
+                                    state.drift_speed =
+                                        cfg.drift_speed.unwrap_or(DEFAULT_DRIFT_SPEED);
+                                }
+                                if cfg.drift_x != prev_cfg.drift_x {
+                                    state.drift_x = cfg.drift_x.unwrap_or(DEFAULT_DRIFT_X);
+                                }
+                                if cfg.drift_y != prev_cfg.drift_y {
+                                    state.drift_y = cfg.drift_y.unwrap_or(DEFAULT_DRIFT_Y);
+                                }
+                                if cfg.fps != prev_cfg.fps {
+                                    state.fps = cfg.fps.unwrap_or(0);
+                                }
+                                if cfg.idle_minutes != prev_cfg.idle_minutes {
+                                    state.idle_minutes = cfg.idle_minutes.unwrap_or(0.0);
+                                }
+                                if cfg.spin != prev_cfg.spin {
+                                    state.spin = cfg.spin.unwrap_or(0.0).clamp(0.0, 0.98);
+                                }
+                                if cfg.pin_x != prev_cfg.pin_x || cfg.pin_y != prev_cfg.pin_y {
+                                    state.pinned_px = match (cfg.pin_x, cfg.pin_y) {
+                                        (Some(x), Some(y)) => Some([
+                                            state.roam_pos[0]
+                                                + state.roam_size[0] * x.clamp(0.0, 1.0) as f64,
+                                            state.roam_pos[1]
+                                                + state.roam_size[1] * y.clamp(0.0, 1.0) as f64,
+                                        ]),
+                                        _ => None,
+                                    };
+                                }
+                                #[cfg(windows)]
+                                if cfg.fix_screenshots != prev_cfg.fix_screenshots {
+                                    fix_screenshots = cfg.fix_screenshots.unwrap_or(1) != 0;
+                                }
+                                if cfg.monitor != prev_cfg.monitor {
+                                    let sel = sel_from_cfg(cfg.monitor);
+                                    if sel != current_sel {
+                                        state.set_selection(elwt, &monitors, sel);
+                                        current_sel = sel;
+                                        #[cfg(any(windows, target_os = "macos"))]
+                                        if let Some(t) = &tray {
+                                            let checked = match current_sel {
+                                                None => 0,
+                                                Some(i) => i + 1,
+                                            };
+                                            for (j, it) in t.monitors.iter().enumerate() {
+                                                it.set_checked(j == checked);
+                                            }
+                                        }
+                                    }
+                                }
+                                prev_cfg = cfg;
                             }
                         }
                     }
                 }
+            }
 
-                // frame pacing: hidden -> low-power 0.5s idle polling (no
-                // rendering at all); uncapped -> vsync-bound Poll; capped ->
-                // wake at the next frame deadline (saves battery)
-                let visible = state.panes.iter().any(|p| p.visible);
-                if !visible {
-                    elwt.set_control_flow(ControlFlow::WaitUntil(
-                        std::time::Instant::now() + std::time::Duration::from_millis(500),
-                    ));
-                } else if state.fps == 0 {
+            // frame pacing: hidden -> low-power 0.5s idle polling (no
+            // rendering at all); uncapped -> vsync-bound Poll; capped ->
+            // wake at the next frame deadline (saves battery)
+            let visible = state.panes.iter().any(|p| p.visible);
+            if !visible {
+                elwt.set_control_flow(ControlFlow::WaitUntil(
+                    std::time::Instant::now() + std::time::Duration::from_millis(500),
+                ));
+            } else if state.fps == 0 {
+                for p in state.panes.iter().filter(|p| p.visible) {
+                    p.window.request_redraw();
+                }
+                elwt.set_control_flow(ControlFlow::Poll);
+            } else {
+                let now = std::time::Instant::now();
+                if now >= next_frame {
+                    next_frame = now + std::time::Duration::from_secs_f64(1.0 / state.fps as f64);
                     for p in state.panes.iter().filter(|p| p.visible) {
                         p.window.request_redraw();
                     }
-                    elwt.set_control_flow(ControlFlow::Poll);
-                } else {
-                    let now = std::time::Instant::now();
-                    if now >= next_frame {
-                        next_frame =
-                            now + std::time::Duration::from_secs_f64(1.0 / state.fps as f64);
-                        for p in state.panes.iter().filter(|p| p.visible) {
-                            p.window.request_redraw();
-                        }
-                    }
-                    elwt.set_control_flow(ControlFlow::WaitUntil(next_frame));
                 }
+                elwt.set_control_flow(ControlFlow::WaitUntil(next_frame));
             }
-            _ => {}
-        })
-        .unwrap();
+        }
+        _ => {}
+    });
+    run_result.unwrap();
 }

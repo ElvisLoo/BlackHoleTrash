@@ -1,14 +1,9 @@
-# Singularity
+# Black Hole Trash
 
-A slowly drifting black hole that bends your entire Windows desktop like a real
-gravitational lens - as a **single standalone app**. No terminal, no external
-tools: run one executable and the hole wanders across your screen, warping
-whatever it passes over.
-
-Inspired by [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole), but
-freed from Ghostty and Claude Code.
-
-![A black hole drifting across the desktop, lensing the windows around it](docs/demo.gif)
+A compact, draggable black hole that bends the live Windows desktop and acts
+as a real Recycle Bin. Drag files or folders into its event horizon and Windows
+moves them to the Recycle Bin through the Shell API—never through a permanent
+deletion fallback.
 
 ## Features
 
@@ -25,9 +20,13 @@ freed from Ghostty and Claude Code.
 - **A real overlay** - fullscreen, always-on-top, click-through; your apps keep
   working underneath while the hole warps them. The overlay excludes itself
   from capture, so there is no mirror-feedback
-- **Place it anywhere** - hold Ctrl+Shift and the hole follows your mouse;
-  release to pin it in place. Tray: Position, or `pin_x`/`pin_y` in the
-  config file; Auto drift resumes the wandering
+- **Real Recycle Bin integration** - Explorer files, folders and multi-item
+  drops are accepted through Windows OLE and recycled with `IFileOperation`
+  plus `FOFX_RECYCLEONDELETE`; unsupported locations are rejected
+- **Compact and movable** - the default black hole is only slightly larger
+  than a desktop icon. Drag it directly with the left mouse button to pin it
+  anywhere; Ctrl+Shift, the Position tray menu and `pin_x`/`pin_y` remain
+  available
 - **Multi-monitor** - the hole roams across all monitors by default,
   crossing boundaries seamlessly (one overlay and capture per monitor).
   Confine it to a single monitor from the tray or with `monitor` in the
@@ -60,9 +59,9 @@ Windows) and Windows 10 2004+ / Windows 11.
 cargo run --release
 ```
 
-The overlay covers the screen, the hole drifts on its own, and clicks pass
-through to your apps. Switch the disk look from the tray icon (the ^ overflow
-area) - 8 presets from Inferno to Zen. Quit via the tray menu or Esc.
+The compact black hole starts pinned. Drag it with the left mouse button to
+move it, drop Explorer items onto it to send them to the Recycle Bin, switch
+the disk look from the tray icon, and quit through the tray menu or Esc.
 
 Cross-compiling from WSL also works: `rustup target add x86_64-pc-windows-gnu`,
 install `mingw-w64`, then `cargo build --release --target x86_64-pc-windows-gnu`.
@@ -88,15 +87,6 @@ Not yet - neither X11 nor Wayland offers a way to exclude a window from
 capture, so a live overlay feeds back into itself. A wallpaper-warp mode is
 the likely path; contributions welcome.
 
-## No-build alternative (ShaderGlass)
-
-If you just want the effect over your desktop today without building anything,
-`shaderglass/` contains the same lens as a shader for
-[ShaderGlass](https://github.com/mausimus/ShaderGlass): load
-`shaderglass/singularity.slangp` via **Shader → Import custom** with
-**Input → Desktop** and **Output → Mode → Glass**. This is the stop-gap; the
-standalone app above is the real goal.
-
 ## How it works
 
 The desktop is captured into a GPU texture and plays the role of the lensed
@@ -109,8 +99,8 @@ the relativistic Doppler factor. Far from the hole an analytic weak-field
 formula takes over with a seamless handoff. The centre follows a slow
 Lissajous path so the hole drifts on its own.
 
-Tuning: disk looks live in `src/main.rs` (`PRESETS`), size in `HOLE_RADIUS`,
-drift and integration budget in `src/singularity.wgsl` (`DRIFT_*`, `N_STEPS`).
+Tuning: disk looks live in `src/main.rs` (`PRESETS`), while lensing and
+integration live in `src/black_hole_trash.wgsl`.
 
 ## Performance & battery
 
@@ -128,7 +118,7 @@ the hole is on screen.
 The overlay excludes itself from screen capture: it captures the desktop
 itself, and without that exclusion it would see its own output and
 collapse into an infinite mirror. That would normally keep the hole out
-of your screenshots, so Singularity fixes them instead: when a
+of your screenshots, so Black Hole Trash fixes them instead: when a
 full-screen screenshot lands on the clipboard right after Print Screen,
 the hole is composited back into the image before you paste it. Region
 snips and files saved to disk are deliberately left untouched, and
@@ -144,8 +134,10 @@ protected your PC" - click **More info → Run anyway**, or build from source.
 
 ## Credits
 
+- Black Hole Trash is based on
+  [GreenScreen410/singularity](https://github.com/GreenScreen410/singularity)
+  and retains its MIT license
 - Concept inspired by [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole) by s0xDk
-- Stop-gap runs on [ShaderGlass](https://github.com/mausimus/ShaderGlass) by mausimus
 
 ## License
 

@@ -1,7 +1,7 @@
-// Offline WGSL validation: parse + validate singularity.wgsl without a GPU.
+// Offline WGSL validation: parse + validate black_hole_trash.wgsl without a GPU.
 // Run: cargo run --example validate_shader
 fn main() {
-    let src = include_str!("../src/singularity.wgsl");
+    let src = include_str!("../src/black_hole_trash.wgsl");
     let module = match naga::front::wgsl::parse_str(src) {
         Ok(m) => m,
         Err(e) => {

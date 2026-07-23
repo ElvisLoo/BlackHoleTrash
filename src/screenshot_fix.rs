@@ -17,7 +17,9 @@ use windows::Win32::Foundation::{HANDLE, HGLOBAL};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
 };
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
 
 const CF_DIB: u32 = 8;
 
@@ -123,8 +125,8 @@ fn write_clipboard_dib(bytes: &[u8]) -> Result<(), String> {
         OpenClipboard(None).map_err(|e| format!("OpenClipboard: {e}"))?;
         let res = (|| {
             EmptyClipboard().map_err(|e| format!("EmptyClipboard: {e}"))?;
-            let hg = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
-                .map_err(|e| format!("GlobalAlloc: {e}"))?;
+            let hg =
+                GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|e| format!("GlobalAlloc: {e}"))?;
             let ptr = GlobalLock(hg) as *mut u8;
             if ptr.is_null() {
                 return Err("GlobalLock failed".into());
@@ -155,8 +157,7 @@ fn crop_bgra(dib: &Dib, x0: i32, y0: i32, w: u32, h: u32, vx: i32, vy: i32) -> V
         let src = dib.pixel_offset + src_row * dib.stride + px * bypp;
         let dst = y * w as usize * 4;
         if dib.bpp == 32 {
-            out[dst..dst + w as usize * 4]
-                .copy_from_slice(&dib.bytes[src..src + w as usize * 4]);
+            out[dst..dst + w as usize * 4].copy_from_slice(&dib.bytes[src..src + w as usize * 4]);
         } else {
             for x in 0..w as usize {
                 let s = src + x * 3;
@@ -185,8 +186,7 @@ fn paste_bgra(dib: &mut Dib, data: &[u8], x0: i32, y0: i32, w: u32, h: u32, vx: 
         let dst = dib.pixel_offset + dst_row * dib.stride + px * bypp;
         let src = y * w as usize * 4;
         if dib.bpp == 32 {
-            dib.bytes[dst..dst + w as usize * 4]
-                .copy_from_slice(&data[src..src + w as usize * 4]);
+            dib.bytes[dst..dst + w as usize * 4].copy_from_slice(&data[src..src + w as usize * 4]);
         } else {
             for x in 0..w as usize {
                 let s = src + x * 4;
@@ -372,9 +372,8 @@ pub fn try_fix(
             virtual_origin.0,
             virtual_origin.1,
         );
-        let rendered = render_pane_shot(
-            device, queue, pipeline, layout, sampler, format, shot, &bg,
-        )?;
+        let rendered =
+            render_pane_shot(device, queue, pipeline, layout, sampler, format, shot, &bg)?;
         paste_bgra(
             &mut dib,
             &rendered,

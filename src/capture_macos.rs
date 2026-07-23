@@ -35,7 +35,7 @@ const FORMAT_32BGRA: u32 = u32::from_be_bytes(*b"BGRA");
 
 define_class!(
     #[unsafe(super(NSObject))]
-    #[name = "SingularityStreamOutput"]
+    #[name = "BlackHoleTrashStreamOutput"]
     #[ivars = Shared]
     struct Output;
 
@@ -57,8 +57,7 @@ define_class!(
             };
             // CVPixelBufferRef and CVImageBufferRef are the same object in
             // CoreVideo's C API; the bindings just expose them as two types.
-            let pb: &CVPixelBuffer =
-                unsafe { &*((&*image) as *const _ as *const CVPixelBuffer) };
+            let pb: &CVPixelBuffer = unsafe { &*((&*image) as *const _ as *const CVPixelBuffer) };
 
             unsafe {
                 if CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly) != 0 {
@@ -101,81 +100,83 @@ impl Output {
 pub fn start(shared: Shared, monitor_index: usize) {
     shared.lock().unwrap().monitor_index = monitor_index;
     eprintln!("capture: requesting shareable content (screen-recording permission)");
-    let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        if content.is_null() {
-            let msg = unsafe { error.as_ref().map(|e| e.localizedDescription()) };
-            eprintln!(
-                "capture: no shareable content - grant Screen Recording permission \
+    let handler = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            if content.is_null() {
+                let msg = unsafe { error.as_ref().map(|e| e.localizedDescription()) };
+                eprintln!(
+                    "capture: no shareable content - grant Screen Recording permission \
                  in System Settings and relaunch ({msg:?})"
-            );
-            return;
-        }
-        let content = unsafe { &*content };
-        let displays = unsafe { content.displays() };
-        // display selection follows the startup monitor choice; live monitor
-        // switching is not wired up on macOS yet
-        let idx = shared.lock().unwrap().monitor_index;
-        let display = if idx < displays.count() {
-            Some(unsafe { displays.objectAtIndex_unchecked(idx) }.retain())
-        } else {
-            displays.firstObject()
-        };
-        let Some(display) = display else {
-            eprintln!("capture: no displays available");
-            return;
-        };
-
-        unsafe {
-            // Whole display; our own window is excluded via sharingType, so
-            // no per-window exclusion list is needed here.
-            let filter = SCContentFilter::initWithDisplay_excludingWindows(
-                SCContentFilter::alloc(),
-                &display,
-                &NSArray::new(),
-            );
-
-            let config = SCStreamConfiguration::new();
-            // SCDisplay reports points; on Retina the stream still delivers
-            // a full-resolution buffer scaled to this size. Good enough for
-            // a lensed background - revisit with pointPixelScale if blurry.
-            config.setWidth(display.width() as usize);
-            config.setHeight(display.height() as usize);
-            config.setPixelFormat(FORMAT_32BGRA);
-            // like the Windows path: the real cursor is drawn above the
-            // overlay anyway, a captured copy would only ghost near the hole
-            config.setShowsCursor(false);
-
-            let stream = SCStream::initWithFilter_configuration_delegate(
-                SCStream::alloc(),
-                &filter,
-                &config,
-                None,
-            );
-            let output = Output::new(shared.clone());
-            if let Err(e) = stream.addStreamOutput_type_sampleHandlerQueue_error(
-                ProtocolObject::from_ref(&*output),
-                SCStreamOutputType::Screen,
-                None, // SCK picks a queue
-            ) {
-                eprintln!("capture: addStreamOutput failed: {e:?}");
+                );
                 return;
             }
+            let content = unsafe { &*content };
+            let displays = unsafe { content.displays() };
+            // display selection follows the startup monitor choice; live monitor
+            // switching is not wired up on macOS yet
+            let idx = shared.lock().unwrap().monitor_index;
+            let display = if idx < displays.count() {
+                Some(unsafe { displays.objectAtIndex_unchecked(idx) }.retain())
+            } else {
+                displays.firstObject()
+            };
+            let Some(display) = display else {
+                eprintln!("capture: no displays available");
+                return;
+            };
 
-            let started = RcBlock::new(|err: *mut NSError| {
-                if err.is_null() {
-                    eprintln!("capture: started");
-                } else {
-                    let msg = err.as_ref().map(|e| e.localizedDescription());
-                    eprintln!("capture: start failed: {msg:?}");
+            unsafe {
+                // Whole display; our own window is excluded via sharingType, so
+                // no per-window exclusion list is needed here.
+                let filter = SCContentFilter::initWithDisplay_excludingWindows(
+                    SCContentFilter::alloc(),
+                    &display,
+                    &NSArray::new(),
+                );
+
+                let config = SCStreamConfiguration::new();
+                // SCDisplay reports points; on Retina the stream still delivers
+                // a full-resolution buffer scaled to this size. Good enough for
+                // a lensed background - revisit with pointPixelScale if blurry.
+                config.setWidth(display.width() as usize);
+                config.setHeight(display.height() as usize);
+                config.setPixelFormat(FORMAT_32BGRA);
+                // like the Windows path: the real cursor is drawn above the
+                // overlay anyway, a captured copy would only ghost near the hole
+                config.setShowsCursor(false);
+
+                let stream = SCStream::initWithFilter_configuration_delegate(
+                    SCStream::alloc(),
+                    &filter,
+                    &config,
+                    None,
+                );
+                let output = Output::new(shared.clone());
+                if let Err(e) = stream.addStreamOutput_type_sampleHandlerQueue_error(
+                    ProtocolObject::from_ref(&*output),
+                    SCStreamOutputType::Screen,
+                    None, // SCK picks a queue
+                ) {
+                    eprintln!("capture: addStreamOutput failed: {e:?}");
+                    return;
                 }
-            });
-            stream.startCaptureWithCompletionHandler(Some(&started));
 
-            // The stream and output must outlive this callback; the overlay
-            // captures for the app's whole lifetime, so leak them.
-            std::mem::forget(stream);
-            std::mem::forget(output);
-        }
-    });
+                let started = RcBlock::new(|err: *mut NSError| {
+                    if err.is_null() {
+                        eprintln!("capture: started");
+                    } else {
+                        let msg = err.as_ref().map(|e| e.localizedDescription());
+                        eprintln!("capture: start failed: {msg:?}");
+                    }
+                });
+                stream.startCaptureWithCompletionHandler(Some(&started));
+
+                // The stream and output must outlive this callback; the overlay
+                // captures for the app's whole lifetime, so leak them.
+                std::mem::forget(stream);
+                std::mem::forget(output);
+            }
+        },
+    );
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
 }
