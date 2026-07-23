@@ -9,6 +9,7 @@ Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，同时也
 - **真实回收站**：通过 Windows OLE `IDropTarget` 接收资源管理器拖放，并使用 `IFileOperation + FOFX_RECYCLEONDELETE` 送入回收站。
 - **绝不永久删除**：项目中没有 `DeleteFile`、`RemoveDirectory` 或 `std::fs::remove_*` 等永久删除后备路径。
 - **小巧且可拖动**：默认大小只比桌面图标略大；按住黑洞并拖动即可改变位置，松开后固定。
+- **鼠标引力与吸收残影**：Windows 光标进入引力场后会受到最高 10% 的渐进阻力，靠近事件视界时沿轨道绕转，并带着多层残影螺旋收进黑洞。
 - **真实引力透镜**：保留 Schwarzschild / Kerr 测地线、事件视界、光子环和相对论吸积盘。
 - **实时桌面捕获**：Windows 使用 DX12、`windows-capture` 和 D3D11 → D3D12 共享纹理零拷贝路径，并保留 CPU 后备路径。
 - **多显示器支持**：每台显示器使用独立 Pane，黑洞可跨屏显示。
@@ -26,7 +27,7 @@ Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，同时也
 
 ## 下载
 
-[下载 BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.0.0/BlackHoleTrash-Setup-x64.exe)
+[下载 BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.1.0/BlackHoleTrash-Setup-x64.exe)
 
 安装包按当前用户安装，不需要管理员权限。由于尚未进行代码签名，Windows SmartScreen 可能显示安全提醒；可在同一 Release 页面下载 `.sha256` 文件核对完整性。
 
@@ -39,6 +40,8 @@ Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，同时也
 5. 通过系统托盘切换预设、大小、位置或退出程序。
 
 也可以按住 `Ctrl+Shift`，让黑洞跟随鼠标并固定到新位置。
+
+鼠标吸收动画约持续 160 ms，并会在黄圈附近开始收束。吸附不会锁死光标：快速向外甩动会立即脱离引力场；吸收后的系统光标最多隐藏 150 ms，并会在下一次物理移动时立即恢复。拖动黑洞本体时吸附会暂时停用，拖入文件时则保持生效。
 
 ## 安全规则
 

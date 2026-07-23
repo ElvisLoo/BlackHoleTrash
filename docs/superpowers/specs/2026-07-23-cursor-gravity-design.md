@@ -18,17 +18,19 @@ exclusion, recycle-bin operation, tray, or presets.
 
 ## Approved Experience
 
-- Gravity starts outside the visible disk and increases continuously with
-  proximity.
-- Pointer resistance is capped at 20%. There is no hard cursor lock.
-- A small tangential component bends the path into a smooth orbital arc.
+- Gravity starts well outside the visible disk and increases continuously
+  across a field six times the physical hole radius.
+- Pointer resistance is capped at 10%. There is no hard cursor lock.
+- A small tangential component bends the path into a smooth orbital arc before
+  the pointer reaches the visible disk.
 - A fast outward movement always escapes the field.
 - Inside the visual field, a GPU proxy replaces the native arrow.
 - The proxy becomes a continuous blurred ribbon rather than a series of copied
   arrow shapes.
 - Stretch, blur, trail length, and angular curvature increase gradually toward
   the event horizon.
-- On absorption, the proxy shrinks into the centre and disappears for 150 ms.
+- On absorption, the proxy makes a short spiral from the warm ring, shrinks
+  into the centre in about 160 ms, and disappears for 150 ms.
 - The next physical mouse movement restores the pointer immediately.
 - The same behavior remains active during Shell file drags so the pointer can
   be guided naturally onto the recycle drop target.
@@ -64,9 +66,10 @@ and compile without cursor-gravity fields or APIs.
 For each non-injected mouse move:
 
 1. Compute the physical delta from the previous input position.
-2. Compute normalized distance from the current black-hole centre.
+2. Compute normalized distance from the current black-hole centre; the field
+   begins at six times the physical hole radius.
 3. Apply a smooth radial falloff that is zero outside the field.
-4. Reduce the input delta by at most 20%.
+4. Reduce the input delta by at most 10%.
 5. Add a bounded inward force and a smaller spin-aligned tangential force.
 6. Clamp the correction so one update cannot jump or trap the cursor.
 7. Submit the adjusted position as one injected move and ignore that injected
@@ -186,7 +189,7 @@ but `cargo test` will not be run during this implementation unless the user
 changes that instruction. Manual acceptance covers:
 
 - normal movement outside the field;
-- gradual 20% maximum resistance;
+- gradual 10% maximum resistance;
 - fast-flick escape;
 - smooth trail and orbital convergence;
 - 150 ms recovery after absorption;

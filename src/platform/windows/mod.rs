@@ -1,7 +1,9 @@
+mod cursor_gravity;
 mod drop_window;
 mod ole_drop_target;
 mod recycle_bin;
 
+pub use cursor_gravity::{CursorGravityController, CursorSnapshot, TRAIL_SAMPLES};
 pub use drop_window::DropWindow;
 pub use recycle_bin::{recycle_async, show_recycle_failure, RecycleResult};
 

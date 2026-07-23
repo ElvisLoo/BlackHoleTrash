@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a Windows-only 20% mouse-resistance field and a smooth GPU-rendered cursor trail that spirals into the existing movable black-hole recycle target.
+**Goal:** Add a Windows-only 10% mouse-resistance field and a smooth GPU-rendered cursor trail that spirals into the existing movable black-hole recycle target.
 
 **Architecture:** A focused Windows module installs a `WH_MOUSE_LL` hook, shapes only movement events, distinguishes injected events, and publishes an allocation-free render snapshot. The existing per-pane uniform buffer carries a fixed trail history to WGSL, where a final composition function draws the proxy cursor without changing desktop capture or black-hole lensing.
 
@@ -31,15 +31,17 @@ the D3D11-to-D3D12 zero-copy texture path or CPU capture fallback.
 
 - [ ] **Step 1: Define fixed data types and constants**
 
-Add the following public surface, with the fixed 20% cap approved in the spec:
+Add the following public surface, with the fixed 10% cap approved in the spec:
 
 ```rust
 pub const TRAIL_SAMPLES: usize = 16;
-const FIELD_RADIUS_MULTIPLIER: f64 = 4.2;
-const MAX_RESISTANCE: f64 = 0.20;
+const FIELD_RADIUS_MULTIPLIER: f64 = 6.0;
+const MAX_RESISTANCE: f64 = 0.10;
 const MAX_CORRECTION_PX: f64 = 7.0;
 const ESCAPE_SPEED_PX: f64 = 34.0;
 const HIDDEN_SECONDS: f32 = 0.150;
+const ABSORB_SECONDS: f32 = 0.160;
+const ABSORB_RADIUS_MULTIPLIER: f64 = 2.20;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CursorSample {
@@ -71,7 +73,7 @@ and flag starts at zero.
 
 - [ ] **Step 2: Implement the movement equation as a pure function**
 
-Use a smooth cubic falloff, a 20% delta reduction, bounded inward/tangential
+Use a smooth cubic falloff, a 10% delta reduction, bounded inward/tangential
 forces, and unconditional fast outward escape:
 
 ```rust
@@ -129,7 +131,7 @@ fn outside_field_is_unchanged() {
 }
 
 #[test]
-fn resistance_never_exceeds_twenty_percent_before_force() {
+fn resistance_never_exceeds_ten_percent_before_force() {
     let field = Field { center: [0.0, 0.0], radius_px: 20.0, enabled: true, suspended: false };
     let (point, strength) = shape_move([30.0, 0.0], [40.0, 0.0], field);
     assert!(strength > 0.0);
@@ -180,10 +182,12 @@ if event.flags.0 & LLMHF_INJECTED.0 != 0 {
 }
 ```
 
-Call `shape_move`, publish the sample into the fixed ring buffer, call
-`SetCursorPos` only when the rounded adjusted point differs from the requested
-point, and return `LRESULT(1)` only after a successful replacement move.
-Otherwise call `CallNextHookEx`.
+Call `shape_move`, publish the sample into the fixed ring buffer, and use one
+tagged absolute `SendInput` move only when the rounded adjusted point differs
+from the requested point. Ignore the controller's private tag when it returns
+through the hook; any other injected move restores the native cursor. Return
+`LRESULT(1)` only after a successful replacement move. Otherwise call
+`CallNextHookEx`.
 
 - [ ] **Step 2: Add balanced visibility and absorption timing**
 
@@ -221,11 +225,12 @@ git commit -m "Add safe Windows cursor attraction"
 - Modify: `src/platform/windows/drop_window.rs`
 - Modify: `src/main.rs`
 
-- [ ] **Step 1: Add widget-drag lifecycle events**
+- [ ] **Step 1: Add a lossless widget-drag lifecycle signal**
 
-Extend `PlatformEvent` with `WidgetDragChanged(bool)`. Send `true` after
-successful `SetCapture` on `WM_LBUTTONDOWN`; send `false` on `WM_LBUTTONUP`,
-`WM_CAPTURECHANGED`, and `WM_CANCELMODE`.
+Set a shared atomic drag flag to `true` after successful `SetCapture` on
+`WM_LBUTTONDOWN`; set it to `false` on `WM_LBUTTONUP`, `WM_CAPTURECHANGED`, and
+`WM_CANCELMODE`. This flag must not use the bounded event channel because the
+final `false` transition cannot be dropped.
 
 - [ ] **Step 2: Own and update the controller**
 
@@ -247,7 +252,7 @@ cursor_gravity.set_field(
 state.cursor_snapshot = cursor_gravity.snapshot();
 ```
 
-Map `WidgetDragChanged(active)` to `cursor_gravity.set_suspended(active)`.
+Map the current atomic drag flag to `cursor_gravity.set_suspended(active)`.
 Read one `CursorSnapshot` into `State` before pane redraw requests.
 
 - [ ] **Step 3: Preserve OLE file dragging**
@@ -369,7 +374,9 @@ git commit -m "Render smooth cursor absorption trail"
 - [ ] **Step 1: Document behavior and recovery**
 
 Add a Chinese-first feature note and matching English note describing the
-Windows-only 20% maximum resistance, fast-flick escape, 150 ms absorption, and
+Windows-only 10% maximum resistance, fast-flick escape, 160 ms spiral absorption
+from the warm ring,
+150 ms hidden recovery, and
 automatic native-cursor restoration.
 
 - [ ] **Step 2: Format and check**

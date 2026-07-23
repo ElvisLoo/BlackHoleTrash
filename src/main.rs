@@ -32,6 +32,10 @@ mod screenshot_fix;
 
 /// Number of shared GPU textures in the zero-copy ring (Windows).
 pub const GPU_BUFFERS: usize = 3;
+#[cfg(windows)]
+pub const CURSOR_TRAIL_SAMPLES: usize = platform::windows::TRAIL_SAMPLES;
+#[cfg(not(windows))]
+pub const CURSOR_TRAIL_SAMPLES: usize = 16;
 
 // Platform-neutral shared frame state, filled by the capture thread and read
 // by the render loop. Two delivery modes: CPU (data holds the frame bytes)
@@ -69,6 +73,9 @@ pub struct Uniforms {
     pub center: [f32; 2], // hole centre in uv, computed on the CPU
     pub spin: f32,        // Kerr spin 0..0.99; 0 = Schwarzschild fast path
     pub _pad: [f32; 2],
+    pub cursor: [f32; 4],        // pane-local x/y, strength, absorption
+    pub cursor_motion: [f32; 4], // pane-local velocity x/y, active, unused
+    pub cursor_trail: [[f32; 4]; CURSOR_TRAIL_SAMPLES], // x/y, age, valid
 }
 
 const MIN_TRASH_SIZE: f32 = 0.011;
@@ -327,6 +334,8 @@ struct State {
     center_px: [f64; 2],
     pinned_px: Option<[f64; 2]>,
     last_center_tick: std::time::Instant,
+    #[cfg(windows)]
+    cursor_snapshot: platform::windows::CursorSnapshot,
 }
 
 impl State {
@@ -517,6 +526,8 @@ impl State {
             center_px: [0.0, 0.0],
             pinned_px: None,
             last_center_tick: std::time::Instant::now(),
+            #[cfg(windows)]
+            cursor_snapshot: platform::windows::CursorSnapshot::default(),
         };
         state.finish_panes(shells);
         state.update_roam_box();
@@ -652,8 +663,8 @@ impl State {
         let t = (self.fade_start.elapsed().as_secs_f32() / PRESET_FADE_SEC).min(1.0);
         let e = t * t * (3.0 - 2.0 * t);
         let mut out = [0.0f32; 14];
-        for i in 0..14 {
-            out[i] = self.look_from[i] + (self.look_to[i] - self.look_from[i]) * e;
+        for (i, value) in out.iter_mut().enumerate() {
+            *value = self.look_from[i] + (self.look_to[i] - self.look_from[i]) * e;
         }
         out
     }
@@ -870,6 +881,45 @@ impl State {
     /// image instead of the live capture.
     fn pane_uniforms(&self, i: usize) -> Uniforms {
         let pane = &self.panes[i];
+        #[cfg(windows)]
+        let (cursor, cursor_motion, cursor_trail) = {
+            let width = pane.mon_size.width.max(1) as f64;
+            let height = pane.mon_size.height.max(1) as f64;
+            let local_point = |point: [f64; 2]| {
+                [
+                    ((point[0] - pane.mon_pos.x as f64) / width) as f32,
+                    ((point[1] - pane.mon_pos.y as f64) / height) as f32,
+                ]
+            };
+            let point = local_point(self.cursor_snapshot.point);
+            let trail = std::array::from_fn(|index| {
+                let sample = self.cursor_snapshot.trail[index];
+                let local = local_point(sample.point);
+                [local[0], local[1], sample.age, 1.0]
+            });
+            (
+                [
+                    point[0],
+                    point[1],
+                    self.cursor_snapshot.strength,
+                    self.cursor_snapshot.absorption,
+                ],
+                [
+                    self.cursor_snapshot.velocity[0] / width as f32,
+                    self.cursor_snapshot.velocity[1] / height as f32,
+                    if self.cursor_snapshot.active {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                ],
+                trail,
+            )
+        };
+        #[cfg(not(windows))]
+        let (cursor, cursor_motion, cursor_trail) =
+            ([0.0; 4], [0.0; 4], [[0.0; 4]; CURSOR_TRAIL_SAMPLES]);
         Uniforms {
             resolution: [pane.config.width as f32, pane.config.height as f32],
             time: self.start.elapsed().as_secs_f32(),
@@ -888,6 +938,9 @@ impl State {
             ],
             spin: self.spin,
             _pad: [0.0; 2],
+            cursor,
+            cursor_motion,
+            cursor_trail,
         }
     }
 
@@ -1619,6 +1672,14 @@ fn main() {
         }
     };
     #[cfg(windows)]
+    let cursor_gravity = match platform::windows::CursorGravityController::new() {
+        Ok(controller) => Some(controller),
+        Err(error) => {
+            log::error!("cursor gravity unavailable: {error}");
+            None
+        }
+    };
+    #[cfg(windows)]
     let mut active_generation = 0u64;
 
     // ui-side trackers for the event loop
@@ -1765,12 +1826,6 @@ fn main() {
                         | PlatformEvent::DragLeft { .. } => {}
                     }
                 }
-
-                let overlay_visible = state.panes.iter().any(|pane| pane.visible);
-                if let Some(window) = &mut drop_window {
-                    window.set_center(state.center_px);
-                    window.set_enabled(state.pinned_px.is_some() && overlay_visible);
-                }
             }
 
             // Visibility state machine, per pane. This must live HERE,
@@ -1813,6 +1868,24 @@ fn main() {
                     let pane = &mut state.panes[i];
                     pane.window.set_visible(false);
                     pane.visible = false;
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                let overlay_visible = state.panes.iter().any(|pane| pane.visible);
+                if let Some(controller) = &cursor_gravity {
+                    controller.set_suspended(platform::windows::DropWindow::is_dragging());
+                    controller.set_field(
+                        state.center_px,
+                        state.hole_radius as f64 * state.primary_h,
+                        overlay_visible && state.pinned_px.is_some(),
+                    );
+                    state.cursor_snapshot = controller.snapshot();
+                }
+                if let Some(window) = &mut drop_window {
+                    window.set_center(state.center_px);
+                    window.set_enabled(state.pinned_px.is_some() && overlay_visible);
                 }
             }
 
@@ -1900,7 +1973,7 @@ fn main() {
             if let Some(t) = &tray {
                 while let Ok(ev) = tray_icon::menu::MenuEvent::receiver().try_recv() {
                     if let Some(ui) = &update_item {
-                        if &ev.id == ui.id() {
+                        if ev.id == ui.id() {
                             open_url(RELEASES_URL);
                             continue;
                         }

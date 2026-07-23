@@ -46,6 +46,9 @@ struct Uniforms {
     spin: f32,          // Kerr spin 0..0.99; 0 = Schwarzschild fast path
     _pad1: f32,
     _pad2: f32,
+    cursor: vec4<f32>,
+    cursor_motion: vec4<f32>,
+    cursor_trail: array<vec4<f32>, 16>,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var desktop_tex: texture_2d<f32>;
@@ -95,6 +98,190 @@ fn hash21(pin: vec2<f32>) -> f32 {
     var p = fract(pin * vec2<f32>(234.34, 435.345));
     p = p + dot(p, p + 34.23);
     return fract(p.x * p.y);
+}
+
+fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ba = b - a;
+    let h = clamp(dot(p - a, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+    return length(p - (a + ba * h));
+}
+
+fn cross2(a: vec2<f32>, b: vec2<f32>) -> f32 {
+    return a.x * b.y - a.y * b.x;
+}
+
+fn sd_triangle(
+    p: vec2<f32>,
+    a: vec2<f32>,
+    b: vec2<f32>,
+    c: vec2<f32>,
+) -> f32 {
+    let d = min(sd_segment(p, a, b), min(sd_segment(p, b, c), sd_segment(p, c, a)));
+    let s0 = cross2(b - a, p - a);
+    let s1 = cross2(c - b, p - b);
+    let s2 = cross2(a - c, p - c);
+    let inside = (s0 >= 0.0 && s1 >= 0.0 && s2 >= 0.0)
+        || (s0 <= 0.0 && s1 <= 0.0 && s2 <= 0.0);
+    return select(d, -d, inside);
+}
+
+fn sd_box(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let q = abs(p) - half_size;
+    return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0);
+}
+
+fn cursor_arrow_sdf(
+    fragment_px: vec2<f32>,
+    origin_px: vec2<f32>,
+    direction_px: vec2<f32>,
+    stretch: f32,
+    scale: f32,
+) -> f32 {
+    let fallback = vec2<f32>(1.0, 0.0);
+    let tangent = select(fallback, normalize(direction_px), length(direction_px) > 0.05);
+    let normal = vec2<f32>(-tangent.y, tangent.x);
+    let rel = fragment_px - origin_px;
+    var local = vec2<f32>(dot(rel, tangent), dot(rel, normal));
+    local.x = local.x / max(stretch, 0.1);
+    local = local / max(scale, 0.05);
+
+    let head = sd_triangle(
+        local,
+        vec2<f32>(10.5, 0.0),
+        vec2<f32>(-3.5, -6.2),
+        vec2<f32>(-3.5, 6.2),
+    );
+    let stem = sd_box(local - vec2<f32>(-5.0, 0.0), vec2<f32>(4.2, 1.75));
+    return min(head, stem) * scale;
+}
+
+fn cursor_overlay(base: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    if (u.cursor_motion.z < 0.5) {
+        return base;
+    }
+
+    let resolution = max(u.resolution, vec2<f32>(1.0));
+    let fragment_px = uv * resolution;
+    let center_px = vec2<f32>(u.center_x, u.center_y) * resolution;
+    let hole_px = max(u.hole_radius * resolution.y, 1.0);
+    if (length(fragment_px - center_px) > hole_px * 6.0 + 48.0) {
+        return base;
+    }
+    let absorption = smoothstep(0.0, 1.0, u.cursor.w);
+    let collapse = smoothstep(0.18, 1.0, absorption);
+    let strength = clamp(u.cursor.z, 0.0, 1.0);
+    let approach = smoothstep(0.06, 0.82, strength);
+
+    var trail_glow = 0.0;
+    var trail_ink = 0.0;
+    for (var i: i32 = 0; i < 15; i = i + 1) {
+        let ia = u32(i);
+        let ib = u32(i + 1);
+        let sa = u.cursor_trail[ia];
+        let sb = u.cursor_trail[ib];
+        var a = sa.xy * resolution;
+        var b = sb.xy * resolution;
+        let history = f32(i) / 14.0;
+        let spiral_a = approach * history * 0.95
+            + collapse * (3.8 + history * 1.1);
+        let spiral_b = approach * (history + 1.0 / 14.0) * 0.95
+            + collapse * (3.8 + (history + 1.0 / 14.0) * 1.1);
+        a = center_px + rot(a - center_px, spiral_a);
+        b = center_px + rot(b - center_px, spiral_b);
+        let radial_collapse = collapse * collapse;
+        let approach_a = approach * history * 0.18;
+        let approach_b = approach * (history + 1.0 / 14.0) * 0.18;
+        a = mix(
+            a,
+            center_px,
+            clamp(approach_a + radial_collapse * mix(0.92, 0.56, history), 0.0, 1.0),
+        );
+        b = mix(
+            b,
+            center_px,
+            clamp(approach_b + radial_collapse * mix(0.90, 0.52, history), 0.0, 1.0),
+        );
+        let distance = sd_segment(fragment_px, a, b);
+        let width = mix(1.2, 7.5, history) * mix(0.75, 1.35, strength);
+        let age = 0.5 * (sa.z + sb.z);
+        let age_fade = 1.0 - smoothstep(0.10, 0.38, age);
+        let history_fade = 1.0 - smoothstep(0.25, 1.0, history);
+        let valid = min(sa.w, sb.w);
+        let weight = age_fade * history_fade * valid;
+        trail_glow = trail_glow
+            + exp2(-distance * distance / max(width * width, 0.5)) * weight;
+        trail_ink = trail_ink
+            + (1.0 - smoothstep(0.4, width * 0.48 + 0.7, distance)) * weight;
+    }
+
+    let luminance = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let ink = select(vec3<f32>(0.055, 0.06, 0.07), vec3<f32>(0.94, 0.95, 0.97), luminance < 0.42);
+    let rim = select(vec3<f32>(0.96, 0.90, 0.69), vec3<f32>(0.10, 0.075, 0.035), luminance < 0.42);
+
+    var color = mix(base, ink, clamp(trail_ink * 0.075, 0.0, 0.22));
+    color = color + vec3<f32>(1.0, 0.74, 0.30) * min(trail_glow * 0.035, 0.13);
+
+    for (var ghost: i32 = 0; ghost < 4; ghost = ghost + 1) {
+        let index = u32(2 + ghost * 3);
+        let newer = u.cursor_trail[index - 1u];
+        let sample = u.cursor_trail[index];
+        let older = u.cursor_trail[min(index + 1u, 15u)];
+        var origin = sample.xy * resolution;
+        let ghost_history = f32(ghost) / 3.0;
+        let ghost_spiral = approach * ghost_history * 0.95
+            + collapse * (3.8 + ghost_history * 1.1);
+        origin = center_px + rot(origin - center_px, ghost_spiral);
+        origin = mix(
+            origin,
+            center_px,
+            clamp(
+                approach * ghost_history * 0.18
+                    + collapse * collapse * mix(0.88, 0.54, ghost_history),
+                0.0,
+                1.0,
+            ),
+        );
+        let direction = rot((newer.xy - older.xy) * resolution, ghost_spiral);
+        let ghost_scale = (1.0 - absorption * 0.58) * mix(0.94, 0.68, f32(ghost) / 3.0);
+        let ghost_stretch = mix(1.0, 1.75, strength) * (1.0 + f32(ghost) * 0.10);
+        let sdf = cursor_arrow_sdf(
+            fragment_px,
+            origin,
+            direction,
+            ghost_stretch,
+            ghost_scale,
+        );
+        let mask = (1.0 - smoothstep(-0.25, 1.6 + f32(ghost) * 0.35, sdf))
+            * (1.0 - smoothstep(0.06, 0.34, sample.z))
+            * sample.w
+            * mix(0.30, 0.09, f32(ghost) / 3.0);
+        color = mix(color, mix(ink, rim, 0.22), mask);
+    }
+
+    var head_origin = u.cursor.xy * resolution;
+    let head_spiral = collapse * 3.8;
+    head_origin = center_px + rot(head_origin - center_px, head_spiral);
+    head_origin = mix(head_origin, center_px, collapse * collapse);
+    var head_direction = rot(u.cursor_motion.xy * resolution, head_spiral);
+    if (length(head_direction) <= 0.05) {
+        head_direction = center_px - head_origin;
+    }
+    let head_scale = max(1.0 - smoothstep(0.72, 1.0, absorption), 0.03);
+    let head_stretch = mix(1.0, 2.1, strength);
+    let head_sdf = cursor_arrow_sdf(
+        fragment_px,
+        head_origin,
+        head_direction,
+        head_stretch,
+        head_scale,
+    );
+    let outline = 1.0 - smoothstep(0.15, 1.55, head_sdf);
+    let fill = 1.0 - smoothstep(-0.95, 0.25, head_sdf);
+    color = mix(color, rim, outline * (1.0 - absorption));
+    color = mix(color, ink, fill * (1.0 - absorption * 0.75));
+
+    let horizon_mask = smoothstep(hole_px * 0.58, hole_px * 0.94, length(fragment_px - center_px));
+    return mix(base, color, horizon_mask);
 }
 
 // value noise whose y lattice wraps every perY cells - the disk's angular
@@ -321,7 +508,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             background(center + sp_b / vec2<f32>(aspect, 1.0)).b,
         );
         let d = normalize(vec3<f32>(-(pr / b) * (2.0 / b), -1.0));
-        return vec4<f32>(col + stars(d) * u.star * window, 1.0);
+        return vec4<f32>(cursor_overlay(col + stars(d) * u.star * window, uv), 1.0);
     }
 
     // ====================== near field: trace the geodesic ==================
@@ -447,5 +634,5 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
     // disk light is HDR; tonemap it on top of the (untouched) desktop sample
     let col = bg * trans + (vec3<f32>(1.0) - exp(-emitc * u.expo));
-    return vec4<f32>(col, 1.0);
+    return vec4<f32>(cursor_overlay(col, uv), 1.0);
 }

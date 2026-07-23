@@ -1,5 +1,6 @@
 use super::ole_drop_target::OleDropTarget;
 use super::{EventSender, PlatformEvent};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use windows::core::{w, ComObject};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -7,18 +8,19 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::{
     IDropTarget, OleInitialize, OleUninitialize, RegisterDragDrop, RevokeDragDrop,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetCursorPos, GetWindowRect, RegisterClassW,
     SetLayeredWindowAttributes, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST,
-    LWA_ALPHA, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WM_CAPTURECHANGED,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    LWA_ALPHA, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WM_CANCELMODE,
+    WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WINDOW_SIZE: i32 = 88;
 static EVENT_SENDER: OnceLock<EventSender> = OnceLock::new();
 static DRAG_OFFSET: Mutex<Option<[i32; 2]>> = Mutex::new(None);
+static WIDGET_DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub struct DropWindow {
     hwnd: HWND,
@@ -94,10 +96,15 @@ impl DropWindow {
             let _ = ShowWindow(self.hwnd, if enabled { SW_SHOWNOACTIVATE } else { SW_HIDE });
         }
     }
+
+    pub fn is_dragging() -> bool {
+        WIDGET_DRAG_ACTIVE.load(Ordering::Acquire)
+    }
 }
 
 impl Drop for DropWindow {
     fn drop(&mut self) {
+        WIDGET_DRAG_ACTIVE.store(false, Ordering::Release);
         unsafe {
             let _ = RevokeDragDrop(self.hwnd);
             let _ = DestroyWindow(self.hwnd);
@@ -147,6 +154,11 @@ unsafe extern "system" fn window_proc(
                 unsafe {
                     SetCapture(hwnd);
                 }
+                if unsafe { GetCapture() } == hwnd {
+                    WIDGET_DRAG_ACTIVE.store(true, Ordering::Release);
+                } else {
+                    drag_offset().take();
+                }
             }
             return LRESULT(0);
         }
@@ -163,10 +175,12 @@ unsafe extern "system" fn window_proc(
             unsafe {
                 let _ = ReleaseCapture();
             }
+            WIDGET_DRAG_ACTIVE.store(false, Ordering::Release);
             return LRESULT(0);
         }
-        WM_CAPTURECHANGED => {
+        WM_CAPTURECHANGED | WM_CANCELMODE => {
             drag_offset().take();
+            WIDGET_DRAG_ACTIVE.store(false, Ordering::Release);
         }
         _ => {}
     }

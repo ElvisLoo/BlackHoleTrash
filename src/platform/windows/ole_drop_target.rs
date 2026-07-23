@@ -222,7 +222,7 @@ fn paths_from_data_object(data: &IDataObject) -> windows::core::Result<Vec<PathB
     let format = FORMATETC {
         cfFormat: CF_HDROP,
         ptd: std::ptr::null_mut(),
-        dwAspect: DVASPECT_CONTENT.0 as u32,
+        dwAspect: DVASPECT_CONTENT.0,
         lindex: -1,
         tymed: TYMED_HGLOBAL.0 as u32,
     };

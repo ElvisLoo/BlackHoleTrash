@@ -173,6 +173,7 @@ fn crop_bgra(dib: &Dib, x0: i32, y0: i32, w: u32, h: u32, vx: i32, vy: i32) -> V
 }
 
 /// Write a tight top-down BGRA block back into the DIB at the pane rect.
+#[allow(clippy::too_many_arguments)]
 fn paste_bgra(dib: &mut Dib, data: &[u8], x0: i32, y0: i32, w: u32, h: u32, vx: i32, vy: i32) {
     let px = (x0 - vx) as usize;
     let py = (y0 - vy) as usize;
@@ -246,6 +247,8 @@ fn render_pane_shot(
 
     let mut u = shot.uniforms;
     u.has_desktop = 1.0; // the clipboard image is the desktop
+    u.cursor_motion[2] = 0.0;
+    u.cursor[2] = 0.0;
     let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("shot uniforms"),
         size: std::mem::size_of::<Uniforms>() as u64,

@@ -29,6 +29,9 @@ deletion fallback.
   than a desktop icon. Drag it directly with the left mouse button to pin it
   anywhere; Ctrl+Shift, the Position tray menu and `pin_x`/`pin_y` remain
   available
+- **Cursor gravity and absorption trail** - on Windows, the pointer meets up
+  to 10% progressive resistance, curves around the event horizon, and spirals
+  into the hole with a layered directional afterimage
 - **Multi-monitor** - the hole roams across all monitors by default,
   crossing boundaries seamlessly (one overlay and capture per monitor).
   Confine it to a single monitor from the tray or with `monitor` in the
@@ -52,7 +55,7 @@ deletion fallback.
 
 ## Download
 
-[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.0.0/BlackHoleTrash-Setup-x64.exe)
+[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.1.0/BlackHoleTrash-Setup-x64.exe)
 
 The per-user installer requires no administrator privileges. It is currently
 unsigned, so Windows SmartScreen may display a warning; use the `.sha256`
@@ -72,6 +75,10 @@ cargo run --release
 The compact black hole starts pinned. Drag it with the left mouse button to
 move it, drop Explorer items onto it to send them to the Recycle Bin, switch
 the disk look from the tray icon, and quit through the tray menu or Esc.
+The spiral absorption starts around the warm ring and lasts about 160 ms. A fast outward flick always escapes;
+after absorption the native pointer is hidden for at most 150 ms and returns
+immediately on the next physical move. Gravity pauses while repositioning the
+hole itself, but remains active during Explorer file drags.
 
 Cross-compiling from WSL also works: `rustup target add x86_64-pc-windows-gnu`,
 install `mingw-w64`, then `cargo build --release --target x86_64-pc-windows-gnu`.
