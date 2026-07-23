@@ -48,7 +48,15 @@ deletion fallback.
   release exists and, if so, adds an "Update available" entry to the tray
   menu that opens the releases page. That is the only network access it
   ever makes; set `check_updates = 0` in the config file to disable it
-- **Single self-contained exe** - no runtime, no installer, ~8 MB
+- **Standalone executable and installer** - no external runtime required
+
+## Download
+
+[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.0.0/BlackHoleTrash-Setup-x64.exe)
+
+The per-user installer requires no administrator privileges. It is currently
+unsigned, so Windows SmartScreen may display a warning; use the `.sha256`
+asset on the same Release page to verify the download.
 
 ## Build & run
 
