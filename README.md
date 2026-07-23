@@ -1,144 +1,85 @@
 # Black Hole Trash
 
-A compact, draggable black hole that bends the live Windows desktop and acts
-as a real Recycle Bin. Drag files or folders into its event horizon and Windows
-moves them to the Recycle Bin through the Shell API—never through a permanent
-deletion fallback.
+**简体中文** | [English](README.en.md)
 
-## Features
+Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，同时也是一个真正的回收站入口。它使用实时引力透镜着色器扭曲桌面；把文件、文件夹或多个项目拖进事件视界后，Windows Shell 会将它们送入回收站。
 
-- **Real physics** - every pixel near the hole integrates its own null geodesic
-  through the Schwarzschild metric (after Eric Bruneton's black-hole renderer,
-  via [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole)): a true
-  shadow, an Einstein ring with mirrored secondary images, and a tilted
-  Keplerian accretion disk whose far side arcs over and under the hole
-- **Blackbody accretion disk** - Shakura-Sunyaev temperature profile,
-  relativistic Doppler shift and beaming, gravitational time dilation
-- **8 looks, switched live** - Inferno, Gargantua, Quasar, M87\* donut, Blazar,
-  Face-on ember, Pure lens, Zen - pick from the tray menu, with a smooth
-  crossfade (the original tuner's presets, exact values)
-- **A real overlay** - fullscreen, always-on-top, click-through; your apps keep
-  working underneath while the hole warps them. The overlay excludes itself
-  from capture, so there is no mirror-feedback
-- **Real Recycle Bin integration** - Explorer files, folders and multi-item
-  drops are accepted through Windows OLE and recycled with `IFileOperation`
-  plus `FOFX_RECYCLEONDELETE`; unsupported locations are rejected
-- **Compact and movable** - the default black hole is only slightly larger
-  than a desktop icon. Drag it directly with the left mouse button to pin it
-  anywhere; Ctrl+Shift, the Position tray menu and `pin_x`/`pin_y` remain
-  available
-- **Multi-monitor** - the hole roams across all monitors by default,
-  crossing boundaries seamlessly (one overlay and capture per monitor).
-  Confine it to a single monitor from the tray or with `monitor` in the
-  config file
-- **Kerr mode** - give the hole spin (tray: Spin, config: `spin` up to
-  0.98) and it integrates exact Kerr geodesics in Kerr-Schild
-  coordinates instead of Schwarzschild: frame dragging displaces the
-  shadow against the lensing, the ISCO shrinks so the disk hugs the
-  hole, and the field twists asymmetrically. On top of the exact
-  geometry sits a deliberately dramatized swirl layer, because the
-  true twist is physically real but too subtle to read at desktop
-  scale. Costs more GPU while nonzero
-- **Screensaver mode** - optionally appear only after N minutes without
-  keyboard/mouse input, swelling out of nothing, and vanish on the first
-  input (tray: Screensaver, or `idle_minutes` in the config file)
-- **Update notice** - once a day the app asks GitHub whether a newer
-  release exists and, if so, adds an "Update available" entry to the tray
-  menu that opens the releases page. That is the only network access it
-  ever makes; set `check_updates = 0` in the config file to disable it
-- **Single self-contained exe** - no runtime, no installer, ~8 MB
+## 主要功能
 
-## Build & run
+- **真实回收站**：通过 Windows OLE `IDropTarget` 接收资源管理器拖放，并使用 `IFileOperation + FOFX_RECYCLEONDELETE` 送入回收站。
+- **绝不永久删除**：项目中没有 `DeleteFile`、`RemoveDirectory` 或 `std::fs::remove_*` 等永久删除后备路径。
+- **小巧且可拖动**：默认大小只比桌面图标略大；按住黑洞并拖动即可改变位置，松开后固定。
+- **真实引力透镜**：保留 Schwarzschild / Kerr 测地线、事件视界、光子环和相对论吸积盘。
+- **实时桌面捕获**：Windows 使用 DX12、`windows-capture` 和 D3D11 → D3D12 共享纹理零拷贝路径，并保留 CPU 后备路径。
+- **多显示器支持**：每台显示器使用独立 Pane，黑洞可跨屏显示。
+- **托盘与预设**：提供外观、尺寸、位置、帧率、旋转和屏保模式等托盘选项。
+- **捕获排除**：覆盖窗口不会被自身的桌面捕获再次采集，避免无限镜像反馈。
 
-### Windows (primary platform, tested)
+## 系统要求
 
-Requires [Rust](https://rustup.rs) with the MSVC toolchain (the default on
-Windows) and Windows 10 2004+ / Windows 11.
+- Windows 10 2004 或更高版本
+- Windows 11
+- x64 桌面环境
+- 支持 DirectX 12 的显卡
+
+运行正式版本不需要预先安装 Rust、Node.js 或 Python。
+
+## 使用方法
+
+1. 启动 `BlackHoleTrash.exe`。
+2. 按住黑洞并拖动，将它放到需要的位置。
+3. 从 Windows 文件资源管理器拖入文件、文件夹或多个项目。
+4. 在黑洞中心松开鼠标，项目会进入 Windows 回收站。
+5. 通过系统托盘切换预设、大小、位置或退出程序。
+
+也可以按住 `Ctrl+Shift`，让黑洞跟随鼠标并固定到新位置。
+
+## 安全规则
+
+Black Hole Trash 会在拖入和松手时重复校验路径，并拒绝无法确认能安全回收的项目，包括：
+
+- 网络路径和映射网络盘；
+- 移动设备和非固定磁盘；
+- 磁盘根目录；
+- 已位于 `$Recycle.Bin` 内的项目；
+- Windows 系统目录；
+- Black Hole Trash 自身及其安装目录；
+- 已消失、已变化或无法由 Shell 解析的路径。
+
+如果 Shell 拒绝或取消操作，程序会显示错误，文件保持原状；不会改用永久删除。
+
+## 从源码构建
+
+需要安装 [Rust](https://rustup.rs) 的 MSVC 工具链。
 
 ```powershell
-cargo run --release
+cargo build --release --bin BlackHoleTrash
 ```
 
-The compact black hole starts pinned. Drag it with the left mouse button to
-move it, drop Explorer items onto it to send them to the Recycle Bin, switch
-the disk look from the tray icon, and quit through the tray menu or Esc.
+输出文件：
 
-Cross-compiling from WSL also works: `rustup target add x86_64-pc-windows-gnu`,
-install `mingw-w64`, then `cargo build --release --target x86_64-pc-windows-gnu`.
-
-### macOS (UNTESTED - help wanted)
-
-The macOS port (ScreenCaptureKit capture + `NSWindowSharingNone` self-exclusion
-+ menu-bar presets) is structurally complete and kept type-checked via
-`cargo check --target aarch64-apple-darwin`, but has never run on real
-hardware - there is no Mac in this project's dev loop.
-
-```sh
-cargo run --release   # on a Mac
+```text
+target\release\BlackHoleTrash.exe
 ```
 
-On first launch, grant **Screen Recording** permission (System Settings →
-Privacy & Security) and relaunch. If you try it, success or failure reports
-are equally welcome as issues.
+常用检查：
 
-### Linux
+```powershell
+cargo fmt --all
+cargo check --all-targets
+cargo run --example validate_shader
+```
 
-Not yet - neither X11 nor Wayland offers a way to exclude a window from
-capture, so a live overlay feeds back into itself. A wallpaper-warp mode is
-the likely path; contributions welcome.
+WGSL 主着色器位于 `src/black_hole_trash.wgsl`，Windows 拖放与回收逻辑位于 `src/platform/windows/`。
 
-## How it works
+## 配置
 
-The desktop is captured into a GPU texture and plays the role of the lensed
-"sky". For each pixel near the hole, the fragment shader integrates a photon
-geodesic in the Schwarzschild metric (leapfrog, adaptive step): rays under the
-critical impact parameter fall in (the shadow), escaping rays are projected
-back onto the sky plane (lensing, Einstein ring, mirrored images), and every
-crossing of the tilted disk plane accumulates blackbody emission shifted by
-the relativistic Doppler factor. Far from the hole an analytic weak-field
-formula takes over with a seamless handoff. The centre follows a slow
-Lissajous path so the hole drifts on its own.
+程序配置文件名为 `black-hole-trash.toml`，与可执行文件放在同一目录。配置支持热重载；也可以直接使用托盘菜单调整常用选项。
 
-Tuning: disk looks live in `src/main.rs` (`PRESETS`), while lensing and
-integration live in `src/black_hole_trash.wgsl`.
+## 项目来源
 
-## Performance & battery
+Black Hole Trash 基于 [GreenScreen410/singularity](https://github.com/GreenScreen410/singularity) 开发，并保留其 MIT 许可证和原作者署名。黑洞概念亦受到 [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole) 启发。
 
-Capture is zero-copy on Windows: each desktop frame is GPU-copied straight
-into a shared D3D12 texture that the shader samples, so frames never touch
-the CPU (with an automatic CPU fallback for setups where sharing is not
-available). Only pixels near the hole pay for geodesic integration, frames
-are delivered only when the screen changes, and the tray offers an FPS cap.
-In screensaver mode the renderer is fully idle until the hole appears. It is
-still a continuous visual effect though, so expect some battery cost while
-the hole is on screen.
+## 许可证
 
-## Screenshots and the capture exclusion
-
-The overlay excludes itself from screen capture: it captures the desktop
-itself, and without that exclusion it would see its own output and
-collapse into an infinite mirror. That would normally keep the hole out
-of your screenshots, so Black Hole Trash fixes them instead: when a
-full-screen screenshot lands on the clipboard right after Print Screen,
-the hole is composited back into the image before you paste it. Region
-snips and files saved to disk are deliberately left untouched, and
-`fix_screenshots = 0` in the config file turns the whole thing off.
-Screen recording picks the overlay up as-is (the demo above is a plain
-screen recording).
-
-## A note on Windows SmartScreen
-
-Release binaries are not code-signed (certificates are priced for companies,
-not desk toys). The first launch of a downloaded exe may show "Windows
-protected your PC" - click **More info → Run anyway**, or build from source.
-
-## Credits
-
-- Black Hole Trash is based on
-  [GreenScreen410/singularity](https://github.com/GreenScreen410/singularity)
-  and retains its MIT license
-- Concept inspired by [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole) by s0xDk
-
-## License
-
-MIT - see [LICENSE](LICENSE).
+MIT，详见 [LICENSE](LICENSE)。
