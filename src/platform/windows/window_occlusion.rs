@@ -5,7 +5,8 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+    IsIconic, IsWindowVisible, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -69,6 +70,7 @@ struct WindowFacts {
     visible: bool,
     minimized: bool,
     cloaked: bool,
+    tool_window: bool,
     ignored_class: bool,
 }
 
@@ -77,6 +79,7 @@ fn is_occluding_candidate(facts: WindowFacts) -> bool {
         && !facts.same_process
         && !facts.minimized
         && !facts.cloaked
+        && !facts.tool_window
         && !facts.ignored_class
 }
 
@@ -137,6 +140,7 @@ unsafe extern "system" fn enum_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
         visible: unsafe { IsWindowVisible(hwnd).as_bool() },
         minimized: unsafe { IsIconic(hwnd).as_bool() },
         cloaked: window_is_cloaked(hwnd),
+        tool_window: window_is_tool_window(hwnd),
         ignored_class: is_ignored_class(&class),
     };
     if !is_occluding_candidate(facts) {
@@ -176,6 +180,11 @@ fn window_is_cloaked(hwnd: HWND) -> bool {
     }
     .is_ok()
         && cloaked != 0
+}
+
+fn window_is_tool_window(hwnd: HWND) -> bool {
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    style & WS_EX_TOOLWINDOW.0 != 0
 }
 
 fn window_rect(hwnd: HWND) -> Option<Rect> {
@@ -276,6 +285,10 @@ mod tests {
             },
             WindowFacts {
                 cloaked: true,
+                ..ordinary
+            },
+            WindowFacts {
+                tool_window: true,
                 ..ordinary
             },
             WindowFacts {

@@ -17,8 +17,9 @@ pub use cursor_gravity::{CursorGravityController, CursorSnapshot, TRAIL_SAMPLES}
 pub use drop_window::DropWindow;
 pub use recycle_bin::{recycle_async, show_recycle_failure, RecycleResult};
 pub use taskbar::{
-    apply_and_verify as apply_taskbar_exclusion, show_failure as show_taskbar_exclusion_failure,
-    verify as verify_taskbar_exclusion,
+    apply_and_verify as apply_taskbar_exclusion,
+    set_visible_and_verify as set_taskbar_excluded_visibility,
+    show_failure as show_taskbar_exclusion_failure,
 };
 pub use window_occlusion::is_black_hole_occluded;
 

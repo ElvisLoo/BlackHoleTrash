@@ -2063,6 +2063,7 @@ fn main() {
                     let _ = state.render_pane(i); // pre-paint while hidden
                     {
                         let pane = &mut state.panes[i];
+                        #[cfg(not(windows))]
                         pane.window.set_visible(true);
                         // re-assert overlay traits after the hidden start
                         pane.window.set_outer_position(pane.mon_pos);
@@ -2070,8 +2071,10 @@ fn main() {
                         pane.window.set_window_level(WindowLevel::AlwaysOnTop);
                     }
                     #[cfg(windows)]
-                    if let Err(error) =
-                        platform::windows::verify_taskbar_exclusion(&state.panes[i].window)
+                    if let Err(error) = platform::windows::set_taskbar_excluded_visibility(
+                        &state.panes[i].window,
+                        true,
+                    )
                     {
                         for pane in &mut state.panes {
                             pane.window.set_visible(false);
@@ -2097,9 +2100,22 @@ fn main() {
                     state.panes[i].visible = true;
                 } else if !show && state.panes[i].visible {
                     // any input dismisses the screensaver instantly
-                    let pane = &mut state.panes[i];
-                    pane.window.set_visible(false);
-                    pane.visible = false;
+                    #[cfg(windows)]
+                    if let Err(error) = platform::windows::set_taskbar_excluded_visibility(
+                        &state.panes[i].window,
+                        false,
+                    ) {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_taskbar_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
+                    }
+                    #[cfg(not(windows))]
+                    state.panes[i].window.set_visible(false);
+                    state.panes[i].visible = false;
                 }
             }
 

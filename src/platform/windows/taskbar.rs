@@ -56,7 +56,16 @@ pub fn apply_and_verify(window: &Window) -> Result<(), TaskbarExclusionError> {
     verify(window)
 }
 
-pub fn verify(window: &Window) -> Result<(), TaskbarExclusionError> {
+pub fn set_visible_and_verify(window: &Window, visible: bool) -> Result<(), TaskbarExclusionError> {
+    // winit rebuilds GWL_EXSTYLE during visibility changes without carrying
+    // its skip-taskbar state into that rebuild. Apply before showing to avoid
+    // a transient taskbar tab, then apply again after winit rewrites the style.
+    apply_and_verify(window)?;
+    window.set_visible(visible);
+    apply_and_verify(window)
+}
+
+fn verify(window: &Window) -> Result<(), TaskbarExclusionError> {
     let style = read_ex_style(window_hwnd(window)?)?;
     if is_taskbar_excluded(style) {
         Ok(())
