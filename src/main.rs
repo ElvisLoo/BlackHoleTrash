@@ -343,7 +343,7 @@ impl State {
         target: &EventLoopWindowTarget<()>,
         monitors: &[winit::monitor::MonitorHandle],
         selection: Option<usize>, // None = every monitor
-    ) -> State {
+    ) -> Result<State, String> {
         // Windows must be DX12 (the zero-copy capture path shares D3D12
         // textures); macOS is Metal; elsewhere let Vulkan/GL race.
         #[cfg(windows)]
@@ -529,19 +529,25 @@ impl State {
             #[cfg(windows)]
             cursor_snapshot: platform::windows::CursorSnapshot::default(),
         };
-        state.finish_panes(shells);
+        state.finish_panes(shells, "initial setup")?;
         state.update_roam_box();
         state.center_px = [
             state.roam_pos[0] + state.roam_size[0] * 0.5,
             state.roam_pos[1] + state.roam_size[1] * 0.5,
         ];
-        state
+        Ok(state)
     }
 
     /// Turn shells into full panes: configure the surface, create per-pane
     /// resources, start that monitor's capture, then apply the overlay styles
     /// (they must come after the swapchain exists, see main()).
-    fn finish_panes(&mut self, shells: Vec<Shell>) {
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    fn finish_panes(
+        &mut self,
+        shells: Vec<Shell>,
+        exclusion_stage: &'static str,
+    ) -> Result<(), String> {
+        let mut new_panes = Vec::with_capacity(shells.len());
         for shell in shells {
             let Shell {
                 window,
@@ -581,16 +587,17 @@ impl State {
                 monitor_index: mon_index,
                 ..Default::default()
             }));
-            #[cfg(any(windows, target_os = "macos"))]
-            capture::start(shared.clone(), mon_index);
 
             // overlay styles only after the swapchain exists (layered-window
             // rule); the window is still hidden at this point
             let _ = window.set_cursor_hittest(false);
-            #[cfg(any(windows, target_os = "macos"))]
+            #[cfg(windows)]
+            platform::windows::apply_capture_exclusion(&window, exclusion_stage)
+                .map_err(|error| error.to_string())?;
+            #[cfg(target_os = "macos")]
             set_capture_exclusion(&window, true);
 
-            self.panes.push(Pane {
+            new_panes.push(Pane {
                 window,
                 surface,
                 config,
@@ -616,6 +623,12 @@ impl State {
                 gpu_current: None,
             });
         }
+        #[cfg(any(windows, target_os = "macos"))]
+        for pane in &new_panes {
+            capture::start(pane.shared.clone(), pane.mon_index);
+        }
+        self.panes.extend(new_panes);
+        Ok(())
     }
 
     /// The union bounding box of the selected monitors, in virtual pixels.
@@ -643,19 +656,20 @@ impl State {
         target: &EventLoopWindowTarget<()>,
         monitors: &[winit::monitor::MonitorHandle],
         selection: Option<usize>,
-    ) {
+    ) -> Result<(), String> {
         for p in &self.panes {
             // sentinel: tells that pane's capture thread to shut down
             p.shared.lock().unwrap().monitor_index = usize::MAX;
         }
         self.panes.clear();
         let shells = make_shells(&self.instance, target, monitors, selection);
-        self.finish_panes(shells);
+        self.finish_panes(shells, "monitor rebuild")?;
         self.update_roam_box();
         self.center_px = [
             self.roam_pos[0] + self.roam_size[0] * 0.5,
             self.roam_pos[1] + self.roam_size[1] * 0.5,
         ];
+        Ok(())
     }
 
     /// Current look: smoothstep crossfade from look_from to look_to.
@@ -1146,30 +1160,6 @@ fn make_bind_group(
     })
 }
 
-/// Make our overlay window invisible to screen capture (so it doesn't feed
-/// back into the desktop capture). Minimal user32 FFI to avoid pinning a
-/// specific `windows` crate version.
-#[cfg(windows)]
-fn set_capture_exclusion(window: &Window, on: bool) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    const WDA_NONE: u32 = 0x0;
-    const WDA_EXCLUDEFROMCAPTURE: u32 = 0x11;
-    #[link(name = "user32")]
-    extern "system" {
-        fn SetWindowDisplayAffinity(hwnd: isize, dw_affinity: u32) -> i32;
-    }
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            unsafe {
-                SetWindowDisplayAffinity(
-                    h.hwnd.get(),
-                    if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE },
-                );
-            }
-        }
-    }
-}
-
 /// macOS equivalent: NSWindowSharingNone removes the window from all screen
 /// capture (ScreenCaptureKit respects it), preventing self-capture feedback.
 #[cfg(target_os = "macos")]
@@ -1619,7 +1609,16 @@ fn main() {
     #[cfg(any(windows, target_os = "macos"))]
     let mut tray: Option<Tray> = None;
 
-    let mut state = pollster::block_on(State::new(&event_loop, &monitors, current_sel));
+    let mut state = match pollster::block_on(State::new(&event_loop, &monitors, current_sel)) {
+        Ok(state) => state,
+        Err(message) => {
+            #[cfg(windows)]
+            platform::windows::show_capture_exclusion_failure_message(&message);
+            #[cfg(not(windows))]
+            eprintln!("overlay setup failed: {message}");
+            return;
+        }
+    };
 
     // apply the rest of the startup config and make hot-reload diff from it
     if let Some(i) = startup_cfg.preset {
@@ -1856,13 +1855,28 @@ fn main() {
                     }
                     state.update_pane(i);
                     let _ = state.render_pane(i); // pre-paint while hidden
-                    let pane = &mut state.panes[i];
-                    pane.window.set_visible(true);
-                    // re-assert overlay traits after the hidden start
-                    pane.window.set_outer_position(pane.mon_pos);
-                    let _ = pane.window.request_inner_size(pane.mon_size);
-                    pane.window.set_window_level(WindowLevel::AlwaysOnTop);
-                    pane.visible = true;
+                    {
+                        let pane = &mut state.panes[i];
+                        pane.window.set_visible(true);
+                        // re-assert overlay traits after the hidden start
+                        pane.window.set_outer_position(pane.mon_pos);
+                        let _ = pane.window.request_inner_size(pane.mon_size);
+                        pane.window.set_window_level(WindowLevel::AlwaysOnTop);
+                    }
+                    #[cfg(windows)]
+                    if let Err(error) = platform::windows::verify_capture_exclusion(
+                        &state.panes[i].window,
+                        "post-show verification",
+                    ) {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_capture_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
+                    }
+                    state.panes[i].visible = true;
                 } else if !show && state.panes[i].visible {
                     // any input dismisses the screensaver instantly
                     let pane = &mut state.panes[i];
@@ -2024,7 +2038,14 @@ fn main() {
                     } else if let Some(idx) = t.monitors.iter().position(|it| it.id() == &ev.id) {
                         let sel = if idx == 0 { None } else { Some(idx - 1) };
                         if sel != current_sel {
-                            state.set_selection(elwt, &monitors, sel);
+                            if let Err(message) = state.set_selection(elwt, &monitors, sel) {
+                                #[cfg(windows)]
+                                platform::windows::show_capture_exclusion_failure_message(&message);
+                                #[cfg(not(windows))]
+                                eprintln!("overlay setup failed: {message}");
+                                elwt.exit();
+                                return;
+                            }
                             current_sel = sel;
                         }
                         check_one(&t.monitors, idx);
@@ -2105,7 +2126,18 @@ fn main() {
                                 if cfg.monitor != prev_cfg.monitor {
                                     let sel = sel_from_cfg(cfg.monitor);
                                     if sel != current_sel {
-                                        state.set_selection(elwt, &monitors, sel);
+                                        if let Err(message) =
+                                            state.set_selection(elwt, &monitors, sel)
+                                        {
+                                            #[cfg(windows)]
+                                            platform::windows::show_capture_exclusion_failure_message(
+                                                &message,
+                                            );
+                                            #[cfg(not(windows))]
+                                            eprintln!("overlay setup failed: {message}");
+                                            elwt.exit();
+                                            return;
+                                        }
                                         current_sel = sel;
                                         #[cfg(any(windows, target_os = "macos"))]
                                         if let Some(t) = &tray {
