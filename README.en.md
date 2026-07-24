@@ -8,9 +8,9 @@
 
 Black Hole Trash is a compact, draggable Windows desktop black hole and a real Recycle Bin target. It bends the live desktop with real-time gravitational lensing and safely sends dropped files, folders, or multiple items to the Windows Recycle Bin instead of permanently deleting them.
 
-## Download v1.2.0
+## Download v1.3.0
 
-[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.2.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.2.0)
+[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.3.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.3.0)
 
 The per-user installer requires no administrator privileges. It is currently unsigned, so Windows SmartScreen may display a warning. Use the `.sha256` asset on the same Release page to verify the download.
 
@@ -31,19 +31,19 @@ The per-user installer requires no administrator privileges. It is currently uns
 - **Capture exclusion and screenshot repair**: the overlay is excluded from its own desktop capture to prevent recursive mirror feedback; full-screen Print Screen images can composite the hole back into the clipboard image.
 - **Update notices**: the app checks GitHub Releases at most once per day and adds a tray entry when a newer version is available. The check can be disabled in config.
 
-## What's New in v1.2.0
-
-- **Six size tiers**: a sixth tier unlocks after `20` swallowed items and reaches `4.00x` the starting size. Earlier tiers are `1.00 / 1.25 / 1.50 / 1.75 / 2.00x`.
-- **Localized tray**: size, speed, FPS, screensaver, spin, position, monitor, config, and quit labels are now consistently Chinese.
-- **Focused FPS policy**: only `30` and `60` remain, the uncapped rendering branch is removed, and the default and invalid-value fallback are both `30`.
-
-## Desktop Visibility Update
+## What's New in v1.3.0
 
 - **Not always-on-top by default**: the app starts in desktop-aware mode. If an ordinary window does not touch the hole's visible circular area, the hole stays visible in the exposed desktop beside it. The hole hides only when a window intersects that area, then returns when the window moves away, minimizes, or closes.
 - **Optional always-on-top**: right-click the tray icon and check `始终置顶` to keep the hole above ordinary windows. Uncheck it to return immediately to desktop-aware mode.
 - **Tray only**: Black Hole Trash never creates a taskbar button in either mode. Settings and Quit remain available from the system tray.
 - **Double-`Ctrl` placement**: the old `Ctrl+Shift` gesture has been removed. Fully press and release `Ctrl` twice within `350 ms` to move and pin the hole at the pointer. Holding Ctrl, using a shortcut, or pressing another key between taps does not trigger placement.
 - **30 FPS default**: first launch, missing FPS configuration, and invalid values use `30 FPS`. `60 FPS` remains available from the tray.
+
+## What's New in v1.2.0
+
+- **Six size tiers**: a sixth tier unlocks after `20` swallowed items and reaches `4.00x` the starting size. Earlier tiers are `1.00 / 1.25 / 1.50 / 1.75 / 2.00x`.
+- **Localized tray**: size, speed, FPS, screensaver, spin, position, monitor, config, and quit labels are consistently Chinese.
+- **Focused FPS policy**: only `30` and `60` remain and the uncapped rendering branch is removed.
 
 ## Usage
 
@@ -136,7 +136,7 @@ MIT. See [LICENSE](LICENSE).
 
 | Version | Features Added |
 | --- | --- |
-| **Current source** | Desktop-aware visibility by default, optional always-on-top, tray-only presence, double-`Ctrl` placement, and a 30 FPS default. |
+| **v1.3.0** | Desktop-aware visibility by default, optional always-on-top, tray-only presence, double-`Ctrl` placement, and a 30 FPS default. |
 | **v1.2.0** | Six absorption growth tiers up to 4x, Chinese tray controls, 30/60-only FPS choices, and the invalid-FPS fallback policy. |
 | **v1.1.0** | Cursor gravity, progressive resistance, spiral absorption, directional afterimages, outward-flick escape, and cross-monitor motion. |
 | **v1.0.0** | First public Windows x64 installer with real-time lensing, Explorer recycle drops, multi-monitor support, and tray presets. |
