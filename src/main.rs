@@ -78,9 +78,9 @@ pub struct Uniforms {
     pub cursor_trail: [[f32; 4]; CURSOR_TRAIL_SAMPLES], // x/y, age, valid
 }
 
-const MIN_TRASH_SIZE: f32 = 0.011;
-const DEFAULT_SIZE: f32 = 0.014; // full visible disk is roughly 80 px at 1080p
-const MAX_TRASH_SIZE: f32 = 0.018;
+const MIN_TRASH_SIZE: f32 = 0.0165;
+const DEFAULT_SIZE: f32 = 0.021; // full visible disk is roughly 80 px at 1080p
+const MAX_TRASH_SIZE: f32 = 0.027;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
