@@ -13,7 +13,7 @@ Both `README.md` and `README.en.md` use the approved product-first structure:
 3. A focused v1.2.0 section describing the new growth, tray localization, and FPS changes.
 4. Usage, safety rules, configuration, system requirements, and source-build instructions.
 5. Version history for v1.0.0, v1.1.0, and v1.2.0.
-6. A Star History chart for `rrrjqy66/BlackHoleTrash`.
+6. A locally committed Star History snapshot for `rrrjqy66/BlackHoleTrash`, linked to the live Star History page so the README remains readable when the image service is unavailable.
 7. The final section contains the QQ group and donation images side by side. The Chinese README includes QQ group number `1083121107`; the English README keeps the same community links with English labels.
 
 ## Assets
@@ -22,6 +22,7 @@ The supplied images are copied without image editing so their QR codes remain in
 
 - `assets/community/qq-group.jpg`
 - `assets/community/donate.jpg`
+- `assets/community/star-history.svg` (generated from GitHub stargazer timestamps at release preparation time)
 
 GitHub-compatible HTML controls their displayed width. Alt text and nearby labels preserve basic accessibility when images do not load.
 

@@ -2,160 +2,134 @@
 
 [简体中文](README.md) | **English**
 
-A compact, draggable black hole that bends the live Windows desktop and acts
-as a real Recycle Bin. Drag files or folders into its event horizon and Windows
-moves them to the Recycle Bin through the Shell API—never through a permanent
-deletion fallback.
+[![Latest Release](https://img.shields.io/github/v/release/rrrjqy66/BlackHoleTrash?label=release)](https://github.com/rrrjqy66/BlackHoleTrash/releases/latest)
+[![Stars](https://img.shields.io/github/stars/rrrjqy66/BlackHoleTrash)](https://github.com/rrrjqy66/BlackHoleTrash/stargazers)
+[![License](https://img.shields.io/github/license/rrrjqy66/BlackHoleTrash)](LICENSE)
 
-## Features
+Black Hole Trash is a compact, draggable Windows desktop black hole and a real Recycle Bin target. It bends the live desktop with real-time gravitational lensing and safely sends dropped files, folders, or multiple items to the Windows Recycle Bin instead of permanently deleting them.
 
-- **Real physics** - every pixel near the hole integrates its own null geodesic
-  through the Schwarzschild metric (after Eric Bruneton's black-hole renderer,
-  via [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole)): a true
-  shadow, an Einstein ring with mirrored secondary images, and a tilted
-  Keplerian accretion disk whose far side arcs over and under the hole
-- **Blackbody accretion disk** - Shakura-Sunyaev temperature profile,
-  relativistic Doppler shift and beaming, gravitational time dilation
-- **8 looks, switched live** - Inferno, Gargantua, Quasar, M87\* donut, Blazar,
-  Face-on ember, Pure lens, Zen - pick from the tray menu, with a smooth
-  crossfade (the original tuner's presets, exact values)
-- **A real overlay** - fullscreen, always-on-top, click-through; your apps keep
-  working underneath while the hole warps them. The overlay excludes itself
-  from capture, so there is no mirror-feedback
-- **Real Recycle Bin integration** - Explorer files, folders and multi-item
-  drops are accepted through Windows OLE and recycled with `IFileOperation`
-  plus `FOFX_RECYCLEONDELETE`; unsupported locations are rejected
-- **Compact and movable** - the default black hole is only slightly larger
-  than a desktop icon. Drag it directly with the left mouse button to pin it
-  anywhere; Ctrl+Shift, the Position tray menu and `pin_x`/`pin_y` remain
-  available
-- **Cursor gravity and absorption trail** - on Windows, the pointer meets up
-  to 10% progressive resistance, curves around the event horizon, and spirals
-  into the hole with a layered directional afterimage
-- **Multi-monitor** - the hole roams across all monitors by default,
-  crossing boundaries seamlessly (one overlay and capture per monitor).
-  Confine it to a single monitor from the tray or with `monitor` in the
-  config file
-- **Kerr mode** - give the hole spin (tray: Spin, config: `spin` up to
-  0.98) and it integrates exact Kerr geodesics in Kerr-Schild
-  coordinates instead of Schwarzschild: frame dragging displaces the
-  shadow against the lensing, the ISCO shrinks so the disk hugs the
-  hole, and the field twists asymmetrically. On top of the exact
-  geometry sits a deliberately dramatized swirl layer, because the
-  true twist is physically real but too subtle to read at desktop
-  scale. Costs more GPU while nonzero
-- **Screensaver mode** - optionally appear only after N minutes without
-  keyboard/mouse input, swelling out of nothing, and vanish on the first
-  input (tray: Screensaver, or `idle_minutes` in the config file)
-- **Update notice** - once a day the app asks GitHub whether a newer
-  release exists and, if so, adds an "Update available" entry to the tray
-  menu that opens the releases page. That is the only network access it
-  ever makes; set `check_updates = 0` in the config file to disable it
-- **Standalone executable and installer** - no external runtime required
+## Download v1.2.0
 
-## Download
+[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.2.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.2.0)
 
-[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.1.0/BlackHoleTrash-Setup-x64.exe)
+The per-user installer requires no administrator privileges. It is currently unsigned, so Windows SmartScreen may display a warning. Use the `.sha256` asset on the same Release page to verify the download.
 
-The per-user installer requires no administrator privileges. It is currently
-unsigned, so Windows SmartScreen may display a warning; use the `.sha256`
-asset on the same Release page to verify the download.
+## Current Features
 
-## Build & run
+- **Real Recycle Bin drops**: Windows OLE `IDropTarget` accepts Explorer files, folders, and multi-item drops, then recycles them through `IFileOperation + FOFX_RECYCLEONDELETE`.
+- **No permanent-delete fallback**: there is no `DeleteFile`, `RemoveDirectory`, or `std::fs::remove_*` fallback. Source items remain untouched if the Shell rejects or cancels an operation.
+- **Real-time gravitational lensing**: Schwarzschild / Kerr geodesics, the event horizon, photon ring, relativistic accretion disk, and blackbody emission are rendered live.
+- **Eight visual presets**: Inferno, Gargantua, Quasar, M87* donut, Blazar, Face-on ember, Pure lens, and Zen switch live from the tray with a smooth crossfade.
+- **Cursor gravity and absorption trails**: the pointer meets progressive resistance, curves around the event horizon, and spirals inward with layered directional afterimages. A fast outward flick always escapes.
+- **Six absorption growth tiers**: successful item counts at `0 / 1 / 3 / 5 / 10 / 20` select six sizes. The maximum is `4x` the starting size, with a smooth transition between tiers.
+- **Chinese system tray**: visual preset, size, speed, FPS, screensaver, spin, position, monitor, config, and quit controls are available from the tray.
+- **Fixed FPS choices**: the tray exposes only `30 FPS` and `60 FPS`. Missing, `0`, invalid, or unsupported config values fall back to `60`.
+- **Live desktop capture**: Windows uses DX12, `windows-capture`, and a zero-copy D3D11 → D3D12 shared-texture path, with a CPU fallback.
+- **Multi-monitor roaming**: each monitor owns an independent pane. The black hole can cross monitor boundaries or stay on one selected display.
+- **Screensaver mode**: the hole appears after a configured idle period and disappears on the first keyboard or mouse input.
+- **Capture exclusion and screenshot repair**: the overlay is excluded from its own desktop capture to prevent recursive mirror feedback; full-screen Print Screen images can composite the hole back into the clipboard image.
+- **Update notices**: the app checks GitHub Releases at most once per day and adds a tray entry when a newer version is available. The check can be disabled in config.
 
-### Windows (primary platform, tested)
+## What's New in v1.2.0
 
-Requires [Rust](https://rustup.rs) with the MSVC toolchain (the default on
-Windows) and Windows 10 2004+ / Windows 11.
+- **Six size tiers**: a sixth tier unlocks after `20` swallowed items and reaches `4.00x` the starting size. Earlier tiers are `1.00 / 1.25 / 1.50 / 1.75 / 2.00x`.
+- **Localized tray**: size, speed, FPS, screensaver, spin, position, monitor, config, and quit labels are now consistently Chinese.
+- **Focused FPS policy**: only `30` and `60` remain, the uncapped rendering branch is removed, and the default and invalid-value fallback are both `60`.
+
+## Usage
+
+1. Launch `BlackHoleTrash.exe`.
+2. Hold and drag the hole to place it. You can also hold `Ctrl+Shift` to pin it to the pointer.
+3. Drag files, folders, or multiple items from Windows File Explorer.
+4. Release them over the event horizon to send them to the Windows Recycle Bin.
+5. Right-click the tray icon to change the visual preset, size, speed, FPS, position, and other settings.
+
+The pointer absorption lasts about 160 ms and starts near the warm ring. It never traps the pointer: a fast outward flick escapes immediately. The native pointer stays hidden for at most 150 ms after absorption and returns on the next physical movement. Gravity pauses while repositioning the hole itself but remains active during Explorer file drags.
+
+## Safety Rules
+
+Black Hole Trash validates each path when items enter and again when they are released. It rejects locations that cannot be confirmed as safely recyclable, including:
+
+- network paths and mapped network drives;
+- removable devices and non-fixed disks;
+- volume roots;
+- items already inside `$Recycle.Bin`;
+- Windows system directories;
+- Black Hole Trash itself and its installation directory;
+- missing, changed, or Shell-unresolvable paths.
+
+If the Windows Shell rejects or cancels an operation, the files remain where they were. The app never switches to permanent deletion.
+
+## System Requirements
+
+- Windows 10 version 2004 or newer;
+- Windows 11;
+- an x64 desktop environment;
+- a DirectX 12-capable GPU.
+
+The release build does not require Rust, Node.js, Python, or another external runtime.
+
+## Configuration
+
+The config file is named `black-hole-trash.toml` and lives beside the executable. Changes reload automatically; common options are also available from the tray.
+
+```toml
+# FPS accepts only 30 or 60. Missing, invalid, and other values fall back to 60.
+fps = 60
+
+# Size snaps to six tiers: 0.011 / 0.01375 / 0.0165 / 0.01925 / 0.022 / 0.044
+size = 0.011
+
+# Look: inferno | gargantua | quasar | m87 | blazar | ember | lens | zen
+preset = "gargantua"
+```
+
+Open the config file from the tray to see the complete generated template.
+
+## Build from Source
+
+Install [Rust](https://rustup.rs) with the MSVC toolchain.
 
 ```powershell
-cargo run --release
+cargo build --release --bin BlackHoleTrash
+cargo test --all-targets
+cargo fmt --all -- --check
+cargo check --all-targets
 ```
 
-The compact black hole starts pinned. Drag it with the left mouse button to
-move it, drop Explorer items onto it to send them to the Recycle Bin, switch
-the disk look from the tray icon, and quit through the tray menu or Esc.
-The spiral absorption starts around the warm ring and lasts about 160 ms. A fast outward flick always escapes;
-after absorption the native pointer is hidden for at most 150 ms and returns
-immediately on the next physical move. Gravity pauses while repositioning the
-hole itself, but remains active during Explorer file drags.
+The executable is written to `target\release\BlackHoleTrash.exe`. The main WGSL shader is `src/black_hole_trash.wgsl`; Windows drag-and-recycle code lives under `src/platform/windows/`.
 
-Cross-compiling from WSL also works: `rustup target add x86_64-pc-windows-gnu`,
-install `mingw-w64`, then `cargo build --release --target x86_64-pc-windows-gnu`.
+## Platform Support
 
-### macOS (UNTESTED - help wanted)
+- **Windows**: primary and tested platform, including desktop capture, Recycle Bin drops, tray controls, and installer packaging.
+- **macOS**: ScreenCaptureKit and menu-bar structures remain in the source, but no real Mac test environment is available.
+- **Linux**: not currently supported because X11 and Wayland do not provide a reliable overlay capture-exclusion path.
 
-The macOS port (ScreenCaptureKit capture + `NSWindowSharingNone` self-exclusion
-+ menu-bar presets) is structurally complete and kept type-checked via
-`cargo check --target aarch64-apple-darwin`, but has never run on real
-hardware - there is no Mac in this project's dev loop.
+## Project Origins and License
 
-```sh
-cargo run --release   # on a Mac
-```
+Black Hole Trash is based on [GreenScreen410/singularity](https://github.com/GreenScreen410/singularity) and retains its MIT license and original attribution. The concept was also inspired by [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole).
 
-On first launch, grant **Screen Recording** permission (System Settings →
-Privacy & Security) and relaunch. If you try it, success or failure reports
-are equally welcome as issues.
+MIT. See [LICENSE](LICENSE).
 
-### Linux
+## Release History
 
-Not yet - neither X11 nor Wayland offers a way to exclude a window from
-capture, so a live overlay feeds back into itself. A wallpaper-warp mode is
-the likely path; contributions welcome.
+| Version | Features Added |
+| --- | --- |
+| **v1.2.0** | Six absorption growth tiers up to 4x, Chinese tray controls, 30/60-only FPS choices, and the invalid-FPS fallback policy. |
+| **v1.1.0** | Cursor gravity, progressive resistance, spiral absorption, directional afterimages, outward-flick escape, and cross-monitor motion. |
+| **v1.0.0** | First public Windows x64 installer with real-time lensing, Explorer recycle drops, multi-monitor support, and tray presets. |
 
-## How it works
+## Star History
 
-The desktop is captured into a GPU texture and plays the role of the lensed
-"sky". For each pixel near the hole, the fragment shader integrates a photon
-geodesic in the Schwarzschild metric (leapfrog, adaptive step): rays under the
-critical impact parameter fall in (the shadow), escaping rays are projected
-back onto the sky plane (lensing, Einstein ring, mirrored images), and every
-crossing of the tilted disk plane accumulates blackbody emission shifted by
-the relativistic Doppler factor. Far from the hole an analytic weak-field
-formula takes over with a seamless handoff. The centre follows a slow
-Lissajous path so the hole drifts on its own.
+[![Star History Chart](assets/community/star-history.svg)](https://www.star-history.com/#rrrjqy66/BlackHoleTrash&Date)
 
-Tuning: disk looks live in `src/main.rs` (`PRESETS`), while lensing and
-integration live in `src/black_hole_trash.wgsl`.
+## Community and Support
 
-## Performance & battery
+<table>
+  <tr>
+    <td align="center"><strong>Join the QQ Group</strong><br><img src="assets/community/qq-group.jpg" width="260" alt="QQ group QR code"><br>Group: 1083121107</td>
+    <td align="center"><strong>Support the Project</strong><br><img src="assets/community/donate.jpg" width="260" alt="Donation QR code"><br>Thank you for your support</td>
+  </tr>
+</table>
 
-Capture is zero-copy on Windows: each desktop frame is GPU-copied straight
-into a shared D3D12 texture that the shader samples, so frames never touch
-the CPU (with an automatic CPU fallback for setups where sharing is not
-available). Only pixels near the hole pay for geodesic integration, frames
-are delivered only when the screen changes, and the tray offers an FPS cap.
-In screensaver mode the renderer is fully idle until the hole appears. It is
-still a continuous visual effect though, so expect some battery cost while
-the hole is on screen.
-
-## Screenshots and the capture exclusion
-
-The overlay excludes itself from screen capture: it captures the desktop
-itself, and without that exclusion it would see its own output and
-collapse into an infinite mirror. That would normally keep the hole out
-of your screenshots, so Black Hole Trash fixes them instead: when a
-full-screen screenshot lands on the clipboard right after Print Screen,
-the hole is composited back into the image before you paste it. Region
-snips and files saved to disk are deliberately left untouched, and
-`fix_screenshots = 0` in the config file turns the whole thing off.
-Screen recording picks the overlay up as-is (the demo above is a plain
-screen recording).
-
-## A note on Windows SmartScreen
-
-Release binaries are not code-signed (certificates are priced for companies,
-not desk toys). The first launch of a downloaded exe may show "Windows
-protected your PC" - click **More info → Run anyway**, or build from source.
-
-## Credits
-
-- Black Hole Trash is based on
-  [GreenScreen410/singularity](https://github.com/GreenScreen410/singularity)
-  and retains its MIT license
-- Concept inspired by [ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole) by s0xDk
-
-## License
-
-MIT - see [LICENSE](LICENSE).
+Stars, issues, and QQ group discussions are welcome.
