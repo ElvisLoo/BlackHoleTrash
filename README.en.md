@@ -81,7 +81,7 @@ fps = 60
 size = 0.011
 
 # Look: inferno | gargantua | quasar | m87 | blazar | ember | lens | zen
-preset = "gargantua"
+preset = gargantua
 ```
 
 Open the config file from the tray to see the complete generated template.

@@ -81,7 +81,7 @@ fps = 60
 size = 0.011
 
 # 外观：inferno | gargantua | quasar | m87 | blazar | ember | lens | zen
-preset = "gargantua"
+preset = gargantua
 ```
 
 完整配置模板可以从托盘菜单打开配置文件后查看。
