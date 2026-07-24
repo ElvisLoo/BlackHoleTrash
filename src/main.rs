@@ -90,49 +90,49 @@ const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
 const PRESETS: [(&str, [f32; 14]); 8] = [
     (
-        "Inferno",
+        "地狱火",
         [
             5500.0, 1.50, 0.35, 1.8, 8.0, 0.90, 0.60, 2.5, 2.2, 1.6, 7.0, 5.0, 1.40, 0.0,
         ],
     ),
     (
-        "Gargantua",
+        "卡冈图雅",
         [
             4500.0, 1.52, 0.10, 2.2, 7.0, 0.85, 0.35, 2.0, 1.4, 0.5, 7.0, 5.0, 1.20, 0.0,
         ],
     ),
     (
-        "Quasar",
+        "类星体",
         [
             15000.0, 1.30, 0.35, 3.0, 14.0, 0.35, 1.00, 4.0, 1.2, 1.3, 8.0, 5.0, 0.80, 0.0,
         ],
     ),
     (
-        "M87* donut",
+        "M87* 甜甜圈",
         [
             3800.0, 0.55, -0.30, 2.2, 6.0, 0.45, 0.90, 3.5, 1.6, 0.4, 3.0, 2.5, 1.10, 0.0,
         ],
     ),
     (
-        "Blazar",
+        "耀变体",
         [
             18000.0, 1.05, 0.55, 3.0, 16.0, 0.30, 1.00, 5.0, 1.0, 1.5, 9.0, 6.0, 0.75, 0.0,
         ],
     ),
     (
-        "Face-on ember",
+        "正面余烬",
         [
             6500.0, 0.30, 0.00, 3.0, 10.0, 0.50, 0.80, 2.5, 1.0, 1.1, 7.0, 5.0, 1.00, 0.0,
         ],
     ),
     (
-        "Pure lens",
+        "纯透镜",
         [
             5500.0, 1.50, 0.35, 1.8, 8.0, 0.00, 1.00, 2.5, 0.0, 1.6, 7.0, 5.0, 1.00, 0.6,
         ],
     ),
     (
-        "Zen",
+        "禅",
         [
             7000.0, 1.45, 0.15, 3.5, 7.0, 0.40, 0.50, 2.0, 0.5, 0.3, 3.0, 1.5, 0.70, 0.0,
         ],
@@ -1405,27 +1405,27 @@ fn tray_icon_rgba(size: u32) -> Vec<u8> {
 // sub-option values, shared by the tray menu and its handler
 #[cfg(any(windows, target_os = "macos"))]
 const SIZES: [(&str, f32); 3] = [
-    ("Small", MIN_TRASH_SIZE),
-    ("Medium", DEFAULT_SIZE),
-    ("Large", MAX_TRASH_SIZE),
+    ("小", MIN_TRASH_SIZE),
+    ("中", DEFAULT_SIZE),
+    ("大", MAX_TRASH_SIZE),
 ];
 #[cfg(any(windows, target_os = "macos"))]
-const SPEEDS: [(&str, f32); 3] = [("Slow", 0.4), ("Normal", 1.0), ("Fast", 2.2)];
+const SPEEDS: [(&str, f32); 3] = [("慢", 0.4), ("正常", 1.0), ("快", 2.2)];
 #[cfg(any(windows, target_os = "macos"))]
-const FPS_OPTS: [(&str, u32); 3] = [("30", 30), ("60", 60), ("Unlimited", 0)];
+const FPS_OPTS: [(&str, u32); 3] = [("30", 30), ("60", 60), ("不限", 0)];
 #[cfg(any(windows, target_os = "macos"))]
 const IDLE_OPTS: [(&str, f32); 4] = [
-    ("Off", 0.0),
-    ("1 min", 1.0),
-    ("5 min", 5.0),
-    ("10 min", 10.0),
+    ("关闭", 0.0),
+    ("1 分钟", 1.0),
+    ("5 分钟", 5.0),
+    ("10 分钟", 10.0),
 ];
 #[cfg(any(windows, target_os = "macos"))]
 const SPIN_OPTS: [(&str, f32); 4] = [
-    ("Off", 0.0),
-    ("Medium", 0.6),
-    ("High", 0.9),
-    ("Extreme", 0.98),
+    ("关闭", 0.0),
+    ("中", 0.6),
+    ("高", 0.9),
+    ("极致", 0.98),
 ];
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -1479,26 +1479,26 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         menu.append(&submenu).unwrap();
         items
     };
-    let sizes = sub("Size", &SIZES.map(|s| s.0), 1);
-    let speeds = sub("Speed", &SPEEDS.map(|s| s.0), 1);
-    let fps = sub("FPS", &FPS_OPTS.map(|s| s.0), 2);
-    let idles = sub("Screensaver", &IDLE_OPTS.map(|s| s.0), 0);
-    let spins = sub("Spin", &SPIN_OPTS.map(|s| s.0), 0);
+    let sizes = sub("大小", &SIZES.map(|s| s.0), 1);
+    let speeds = sub("速度", &SPEEDS.map(|s| s.0), 1);
+    let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), 2);
+    let idles = sub("屏保", &IDLE_OPTS.map(|s| s.0), 0);
+    let spins = sub("自旋", &SPIN_OPTS.map(|s| s.0), 0);
     let positions = sub(
-        "Position",
-        &["Auto drift", "Pinned (Ctrl+Shift to place)"],
+        "位置",
+        &["自动漂移", "固定 (Ctrl+Shift 放置)"],
         if pinned { 1 } else { 0 },
     );
     let monitors = if monitor_labels.len() > 1 {
         let labels: Vec<&str> = monitor_labels.iter().map(|s| s.as_str()).collect();
-        sub("Monitor", &labels, current_monitor)
+        sub("显示器", &labels, current_monitor)
     } else {
         Vec::new()
     };
     menu.append(&PredefinedMenuItem::separator()).unwrap();
-    let open_cfg = MenuItem::new("Open Config File", true, None);
+    let open_cfg = MenuItem::new("打开配置文件", true, None);
     menu.append(&open_cfg).unwrap();
-    let quit = MenuItem::new("Quit", true, None);
+    let quit = MenuItem::new("退出", true, None);
     menu.append(&quit).unwrap();
     let icon = Icon::from_rgba(tray_icon_rgba(32), 32, 32).unwrap();
     let tray = TrayIconBuilder::new()
@@ -1506,7 +1506,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         .with_tooltip(concat!(
             "Black Hole Trash ",
             env!("CARGO_PKG_VERSION"),
-            " - right-click for options"
+            " - 右键查看选项"
         ))
         .with_icon(icon)
         .build()
@@ -1721,7 +1721,7 @@ fn main() {
         Event::NewEvents(winit::event::StartCause::Init) => {
             #[cfg(any(windows, target_os = "macos"))]
             {
-                let mut labels = vec!["All monitors".to_string()];
+                let mut labels = vec!["所有显示器".to_string()];
                 labels.extend(
                     monitors
                         .iter()
@@ -1957,7 +1957,7 @@ fn main() {
             if update_item.is_none() {
                 if let (Some(t), Some(ver)) = (&tray, update_available.lock().unwrap().clone()) {
                     let item = tray_icon::menu::MenuItem::new(
-                        format!("Update available: {ver}"),
+                        format!("有新版本: {ver}"),
                         true,
                         None,
                     );
