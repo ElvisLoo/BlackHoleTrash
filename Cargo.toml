@@ -4,7 +4,7 @@ version = "1.2.0"
 edition = "2021"
 description = "A compact Windows black-hole Recycle Bin with real-time gravitational lensing"
 license = "MIT"
-repository = "https://github.com/rrrjqy66/BlackHoleTrash"
+repository = "https://github.com/ElvisLoo/BlackHoleTrash"
 
 [[bin]]
 name = "BlackHoleTrash"

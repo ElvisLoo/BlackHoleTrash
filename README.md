@@ -27,7 +27,7 @@ Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，同时也
 
 ## 下载
 
-[下载 BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.1.0/BlackHoleTrash-Setup-x64.exe)
+[下载 BlackHoleTrash.exe (v1.2.0)](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.2.0/BlackHoleTrash.exe)
 
 安装包按当前用户安装，不需要管理员权限。由于尚未进行代码签名，Windows SmartScreen 可能显示安全提醒；可在同一 Release 页面下载 `.sha256` 文件核对完整性。
 

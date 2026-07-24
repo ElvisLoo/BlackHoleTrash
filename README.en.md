@@ -55,7 +55,7 @@ deletion fallback.
 
 ## Download
 
-[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.1.0/BlackHoleTrash-Setup-x64.exe)
+[Download BlackHoleTrash.exe (v1.2.0)](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.2.0/BlackHoleTrash.exe)
 
 The per-user installer requires no administrator privileges. It is currently
 unsigned, so Windows SmartScreen may display a warning; use the `.sha256`

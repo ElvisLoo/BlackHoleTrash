@@ -1336,7 +1336,7 @@ const RELEASES_URL: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/releases/late
 
 #[cfg(any(windows, target_os = "macos"))]
 fn fetch_latest_version() -> Option<String> {
-    const API: &str = "https://api.github.com/repos/rrrjqy66/BlackHoleTrash/releases/latest";
+    const API: &str = "https://api.github.com/repos/ElvisLoo/BlackHoleTrash/releases/latest";
     let mut cmd = std::process::Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
     cmd.args([
         "-s",
