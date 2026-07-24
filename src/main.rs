@@ -264,6 +264,97 @@ const DEFAULT_CONFIG: &str = "\
 ";
 
 #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
+/// Save current state to the config file so it persists across restarts.
+fn save_config(state: &State) {
+    let Some(path) = config_path() else { return };
+    let preset_idx = PRESETS.iter().position(|p| p.1 == state.look_to);
+    let preset_key = preset_idx.and_then(|i| PRESET_KEYS.get(i)).copied();
+    let (pin_x, pin_y) = match state.pinned_px {
+        Some(px) => {
+            let rx = (px[0] - state.roam_pos[0]) / state.roam_size[0];
+            let ry = (px[1] - state.roam_pos[1]) / state.roam_size[1];
+            (Some(rx.clamp(0.0, 1.0)), Some(ry.clamp(0.0, 1.0)))
+        }
+        None => (None, None),
+    };
+    let mut lines = vec![
+        "# Black Hole Trash settings - auto-saved on exit".to_string(),
+        String::new(),
+    ];
+    if let Some(key) = preset_key {
+        lines.push(format!("preset = {key}"));
+    }
+    lines.push(format!("size = {:.4}", state.hole_radius));
+    lines.push(format!("drift_speed = {:.2}", state.drift_speed));
+    lines.push(format!("drift_x = {:.2}", state.drift_x));
+    lines.push(format!("drift_y = {:.2}", state.drift_y));
+    lines.push(if state.fps > 0 {
+        format!("fps = {}", state.fps)
+    } else {
+        "fps = 0".to_string()
+    });
+    lines.push(if state.idle_minutes > 0.0 {
+        format!("idle_minutes = {:.0}", state.idle_minutes)
+    } else {
+        "idle_minutes = 0".to_string()
+    });
+    lines.push(if state.spin > 0.0 {
+        format!("spin = {:.2}", state.spin)
+    } else {
+        "spin = 0".to_string()
+    });
+    if let Some(x) = pin_x {
+        lines.push(format!("pin_x = {:.4}", x));
+        lines.push(format!("pin_y = {:.4}", pin_y.unwrap_or(0.5)));
+    }
+    lines.push("check_updates = 1".to_string());
+    lines.push("fix_screenshots = 1".to_string());
+    let _ = std::fs::write(&path, lines.join("\n"));
+}
+
+/// Check if auto-start is enabled in the registry.
+fn auto_start_enabled() -> bool {
+    std::process::Command::new("reg")
+        .args([
+            "query",
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            "/v",
+            "BlackHoleTrash",
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Enable or disable auto-start via registry.
+fn auto_start_set(on: bool) {
+    if on {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::process::Command::new("reg")
+                .args([
+                    "add",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v",
+                    "BlackHoleTrash",
+                    "/d",
+                    &exe.to_string_lossy(),
+                    "/f",
+                ])
+                .spawn();
+        }
+    } else {
+        let _ = std::process::Command::new("reg")
+            .args([
+                "delete",
+                "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "/v",
+                "BlackHoleTrash",
+                "/f",
+            ])
+            .spawn();
+    }
+}
+
 fn ensure_config_file(path: &std::path::Path) {
     if !path.exists() {
         if let Err(e) = std::fs::write(path, DEFAULT_CONFIG) {
@@ -1440,6 +1531,7 @@ struct Tray {
     spins: Vec<tray_icon::menu::CheckMenuItem>,
     positions: Vec<tray_icon::menu::CheckMenuItem>,
     monitors: Vec<tray_icon::menu::CheckMenuItem>,
+    auto_start: tray_icon::menu::CheckMenuItem,
     open_cfg_id: tray_icon::menu::MenuId,
     quit_id: tray_icon::menu::MenuId,
 }
@@ -1496,6 +1588,9 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         Vec::new()
     };
     menu.append(&PredefinedMenuItem::separator()).unwrap();
+    let auto_start = CheckMenuItem::new("开机自启", true, auto_start_enabled(), None);
+    menu.append(&auto_start).unwrap();
+    menu.append(&PredefinedMenuItem::separator()).unwrap();
     let open_cfg = MenuItem::new("打开配置文件", true, None);
     menu.append(&open_cfg).unwrap();
     let quit = MenuItem::new("退出", true, None);
@@ -1522,6 +1617,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         spins,
         positions,
         monitors,
+        auto_start,
         open_cfg_id: open_cfg.id().clone(),
         quit_id: quit.id().clone(),
     }
@@ -1740,7 +1836,10 @@ fn main() {
                 return;
             };
             match event {
-                WindowEvent::CloseRequested => elwt.exit(),
+                WindowEvent::CloseRequested => {
+                    save_config(&state);
+                    elwt.exit();
+                }
                 WindowEvent::KeyboardInput {
                     event:
                         KeyEvent {
@@ -1749,7 +1848,10 @@ fn main() {
                             ..
                         },
                     ..
-                } => elwt.exit(),
+                } => {
+                    save_config(&state);
+                    elwt.exit();
+                }
                 WindowEvent::Resized(new_size) => state.resize_pane(i, new_size),
                 WindowEvent::RedrawRequested => {
                     state.update_pane(i);
@@ -1775,6 +1877,7 @@ fn main() {
                 use windows::Win32::System::Threading::WaitForSingleObject;
                 if unsafe { WaitForSingleObject(HANDLE(quit_event as *mut _), 0) }.0 == 0 {
                     eprintln!("handover requested by a newer launch; exiting");
+                    save_config(&state);
                     elwt.exit();
                 }
             }
@@ -1984,7 +2087,12 @@ fn main() {
                         }
                     };
                     if ev.id == t.quit_id {
+                        save_config(&state);
                         elwt.exit();
+                    } else if ev.id == t.auto_start.id() {
+                        let on = !auto_start_enabled();
+                        auto_start_set(on);
+                        t.auto_start.set_checked(on);
                     } else if ev.id == t.open_cfg_id {
                         if let Some(path) = &cfg_path {
                             ensure_config_file(path);
