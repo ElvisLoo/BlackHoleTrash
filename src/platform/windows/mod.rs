@@ -4,6 +4,7 @@ mod cursor_gravity;
 mod drop_window;
 mod ole_drop_target;
 mod recycle_bin;
+mod taskbar;
 mod window_occlusion;
 
 pub use capture_exclusion::{
@@ -15,6 +16,10 @@ pub use ctrl_double_tap::CtrlDoubleTapController;
 pub use cursor_gravity::{CursorGravityController, CursorSnapshot, TRAIL_SAMPLES};
 pub use drop_window::DropWindow;
 pub use recycle_bin::{recycle_async, show_recycle_failure, RecycleResult};
+pub use taskbar::{
+    apply_and_verify as apply_taskbar_exclusion, show_failure as show_taskbar_exclusion_failure,
+    verify as verify_taskbar_exclusion,
+};
 pub use window_occlusion::is_black_hole_occluded;
 
 use crossbeam_channel::{Receiver, Sender};

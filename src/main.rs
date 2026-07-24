@@ -697,8 +697,12 @@ impl State {
             // rule); the window is still hidden at this point
             let _ = window.set_cursor_hittest(false);
             #[cfg(windows)]
-            platform::windows::apply_capture_exclusion(&window, exclusion_stage)
-                .map_err(|error| error.to_string())?;
+            {
+                platform::windows::apply_taskbar_exclusion(&window)
+                    .map_err(|error| error.to_string())?;
+                platform::windows::apply_capture_exclusion(&window, exclusion_stage)
+                    .map_err(|error| error.to_string())?;
+            }
             #[cfg(target_os = "macos")]
             set_capture_exclusion(&window, true);
 
@@ -1168,17 +1172,19 @@ fn make_shells(
     for i in indices {
         let m = &monitors[i];
         let (pos, size) = (m.position(), m.size());
-        let window = Arc::new(
-            WindowBuilder::new()
-                .with_title("Black Hole Trash")
-                .with_decorations(false)
-                .with_window_level(WindowLevel::AlwaysOnTop)
-                .with_inner_size(size)
-                .with_position(pos)
-                .with_visible(false) // hidden until its first frame is ready
-                .build(target)
-                .unwrap(),
-        );
+        let builder = WindowBuilder::new()
+            .with_title("Black Hole Trash")
+            .with_decorations(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_inner_size(size)
+            .with_position(pos)
+            .with_visible(false); // hidden until its first frame is ready
+        #[cfg(windows)]
+        let builder = {
+            use winit::platform::windows::WindowBuilderExtWindows;
+            builder.with_skip_taskbar(true)
+        };
+        let window = Arc::new(builder.build(target).unwrap());
         let surface = instance.create_surface(window.clone()).unwrap();
         shells.push(Shell {
             window,
@@ -2028,6 +2034,18 @@ fn main() {
                         pane.window.set_outer_position(pane.mon_pos);
                         let _ = pane.window.request_inner_size(pane.mon_size);
                         pane.window.set_window_level(WindowLevel::AlwaysOnTop);
+                    }
+                    #[cfg(windows)]
+                    if let Err(error) =
+                        platform::windows::verify_taskbar_exclusion(&state.panes[i].window)
+                    {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_taskbar_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
                     }
                     #[cfg(windows)]
                     if let Err(error) = platform::windows::verify_capture_exclusion(
