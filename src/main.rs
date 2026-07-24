@@ -79,60 +79,139 @@ pub struct Uniforms {
 }
 
 const MIN_TRASH_SIZE: f32 = 0.011;
-const DEFAULT_SIZE: f32 = 0.014; // full visible disk is roughly 80 px at 1080p
-const MAX_TRASH_SIZE: f32 = 0.018;
+const DEFAULT_SIZE: f32 = MIN_TRASH_SIZE;
+const GROWTH_DURATION_SEC: f32 = 0.4;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
 const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SizeTier {
+    label: &'static str,
+    threshold: usize,
+    multiplier: f32,
+}
+
+const SIZE_TIERS: [SizeTier; 6] = [
+    SizeTier {
+        label: "图标大小（1.00 倍）",
+        threshold: 0,
+        multiplier: 1.0,
+    },
+    SizeTier {
+        label: "吞噬 1 个（1.25 倍）",
+        threshold: 1,
+        multiplier: 1.25,
+    },
+    SizeTier {
+        label: "吞噬 3 个（1.50 倍）",
+        threshold: 3,
+        multiplier: 1.5,
+    },
+    SizeTier {
+        label: "吞噬 5 个（1.75 倍）",
+        threshold: 5,
+        multiplier: 1.75,
+    },
+    SizeTier {
+        label: "吞噬 10 个（2.00 倍）",
+        threshold: 10,
+        multiplier: 2.0,
+    },
+    SizeTier {
+        label: "吞噬 20 个（4.00 倍）",
+        threshold: 20,
+        multiplier: 4.0,
+    },
+];
+
+fn size_level_for_total(total: usize) -> usize {
+    match total {
+        0 => 0,
+        1..=2 => 1,
+        3..=4 => 2,
+        5..=9 => 3,
+        10..=19 => 4,
+        _ => 5,
+    }
+}
+
+fn size_radius(level: usize) -> f32 {
+    MIN_TRASH_SIZE * SIZE_TIERS[level.min(SIZE_TIERS.len() - 1)].multiplier
+}
+
+fn nearest_size_level(radius: f32) -> usize {
+    SIZE_TIERS
+        .iter()
+        .enumerate()
+        .min_by(|(left, _), (right, _)| {
+            (size_radius(*left) - radius)
+                .abs()
+                .total_cmp(&(size_radius(*right) - radius).abs())
+        })
+        .map(|(level, _)| level)
+        .unwrap_or(0)
+}
+
+fn animated_radius(from: f32, to: f32, elapsed: f32) -> f32 {
+    let x = (elapsed / GROWTH_DURATION_SEC).clamp(0.0, 1.0);
+    let eased = x * x * (3.0 - 2.0 * x);
+    from + (to - from) * eased
+}
+
+fn swallowed_progress_after_success(current: usize, added: usize) -> (usize, usize) {
+    let total = current.saturating_add(added).min(20);
+    (total, size_level_for_total(total))
+}
+
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
 const PRESETS: [(&str, [f32; 14]); 8] = [
     (
-        "Inferno",
+        "炼狱",
         [
             5500.0, 1.50, 0.35, 1.8, 8.0, 0.90, 0.60, 2.5, 2.2, 1.6, 7.0, 5.0, 1.40, 0.0,
         ],
     ),
     (
-        "Gargantua",
+        "卡冈图雅",
         [
             4500.0, 1.52, 0.10, 2.2, 7.0, 0.85, 0.35, 2.0, 1.4, 0.5, 7.0, 5.0, 1.20, 0.0,
         ],
     ),
     (
-        "Quasar",
+        "类星体",
         [
             15000.0, 1.30, 0.35, 3.0, 14.0, 0.35, 1.00, 4.0, 1.2, 1.3, 8.0, 5.0, 0.80, 0.0,
         ],
     ),
     (
-        "M87* donut",
+        "M87* 环状",
         [
             3800.0, 0.55, -0.30, 2.2, 6.0, 0.45, 0.90, 3.5, 1.6, 0.4, 3.0, 2.5, 1.10, 0.0,
         ],
     ),
     (
-        "Blazar",
+        "耀变体",
         [
             18000.0, 1.05, 0.55, 3.0, 16.0, 0.30, 1.00, 5.0, 1.0, 1.5, 9.0, 6.0, 0.75, 0.0,
         ],
     ),
     (
-        "Face-on ember",
+        "正面余烬",
         [
             6500.0, 0.30, 0.00, 3.0, 10.0, 0.50, 0.80, 2.5, 1.0, 1.1, 7.0, 5.0, 1.00, 0.0,
         ],
     ),
     (
-        "Pure lens",
+        "纯引力透镜",
         [
             5500.0, 1.50, 0.35, 1.8, 8.0, 0.00, 1.00, 2.5, 0.0, 1.6, 7.0, 5.0, 1.00, 0.6,
         ],
     ),
     (
-        "Zen",
+        "禅",
         [
             7000.0, 1.45, 0.15, 3.5, 7.0, 0.40, 0.50, 2.0, 0.5, 0.3, 3.0, 1.5, 0.70, 0.0,
         ],
@@ -218,8 +297,9 @@ const DEFAULT_CONFIG: &str = "\
 #preset = gargantua
 
 # Shadow radius as a fraction of screen height.
-# Tray Small / Medium / Large = 0.011 / 0.014 / 0.018
-#size = 0.014
+# Six size tiers = 0.011 / 0.01375 / 0.0165 / 0.01925 / 0.022 / 0.044
+# Other values snap to the nearest tier.
+#size = 0.011
 
 # Wander speed multiplier and horizontal/vertical range (0 to 0.5).
 #drift_speed = 1.0
@@ -319,6 +399,10 @@ struct State {
     look_to: [f32; 14],
     fade_start: std::time::Instant,
     hole_radius: f32,
+    hole_radius_from: f32,
+    size_transition_start: std::time::Instant,
+    size_level: usize,
+    swallowed_items: usize,
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
@@ -513,6 +597,10 @@ impl State {
             look_to: PRESETS[DEFAULT_PRESET].1,
             fade_start: std::time::Instant::now(),
             hole_radius: DEFAULT_SIZE,
+            hole_radius_from: DEFAULT_SIZE,
+            size_transition_start: std::time::Instant::now(),
+            size_level: 0,
+            swallowed_items: 0,
             drift_speed: DEFAULT_DRIFT_SPEED,
             drift_x: DEFAULT_DRIFT_X,
             drift_y: DEFAULT_DRIFT_Y,
@@ -796,6 +884,39 @@ impl State {
         self.fade_start = std::time::Instant::now();
     }
 
+    fn current_hole_radius(&self) -> f32 {
+        animated_radius(
+            self.hole_radius_from,
+            self.hole_radius,
+            self.size_transition_start.elapsed().as_secs_f32(),
+        )
+    }
+
+    fn start_size_transition(&mut self, level: usize) {
+        let current = self.current_hole_radius();
+        self.size_level = level.min(SIZE_TIERS.len() - 1);
+        self.hole_radius_from = current;
+        self.hole_radius = size_radius(self.size_level);
+        self.size_transition_start = std::time::Instant::now();
+    }
+
+    fn set_size_level(&mut self, level: usize) {
+        let level = level.min(SIZE_TIERS.len() - 1);
+        self.swallowed_items = SIZE_TIERS[level].threshold;
+        self.start_size_transition(level);
+    }
+
+    fn absorb_successful_items(&mut self, count: usize) -> Option<usize> {
+        let (total, level) = swallowed_progress_after_success(self.swallowed_items, count);
+        self.swallowed_items = total;
+        if level == self.size_level {
+            None
+        } else {
+            self.start_size_transition(level);
+            Some(level)
+        }
+    }
+
     fn resize_pane(&mut self, i: usize, new_size: PhysicalSize<u32>) {
         // Skip no-op reconfigures: the window is layered after startup and a
         // DX12 swapchain rebuild on a layered window fails.
@@ -941,7 +1062,7 @@ impl State {
             look: self.current_look(),
             // the hole keeps one physical size everywhere: radius is relative
             // to the primary monitor's height, rescaled per pane
-            hole_radius: self.hole_radius
+            hole_radius: self.current_hole_radius()
                 * self.appear_factor()
                 * (self.primary_h as f32 / pane.mon_size.height.max(1) as f32),
             center: [
@@ -1394,29 +1515,18 @@ fn tray_icon_rgba(size: u32) -> Vec<u8> {
 
 // sub-option values, shared by the tray menu and its handler
 #[cfg(any(windows, target_os = "macos"))]
-const SIZES: [(&str, f32); 3] = [
-    ("Small", MIN_TRASH_SIZE),
-    ("Medium", DEFAULT_SIZE),
-    ("Large", MAX_TRASH_SIZE),
-];
+const SPEEDS: [(&str, f32); 3] = [("慢速", 0.4), ("正常", 1.0), ("快速", 2.2)];
 #[cfg(any(windows, target_os = "macos"))]
-const SPEEDS: [(&str, f32); 3] = [("Slow", 0.4), ("Normal", 1.0), ("Fast", 2.2)];
-#[cfg(any(windows, target_os = "macos"))]
-const FPS_OPTS: [(&str, u32); 3] = [("30", 30), ("60", 60), ("Unlimited", 0)];
+const FPS_OPTS: [(&str, u32); 3] = [("30 帧", 30), ("60 帧", 60), ("不限帧率", 0)];
 #[cfg(any(windows, target_os = "macos"))]
 const IDLE_OPTS: [(&str, f32); 4] = [
-    ("Off", 0.0),
-    ("1 min", 1.0),
-    ("5 min", 5.0),
-    ("10 min", 10.0),
+    ("关闭", 0.0),
+    ("1 分钟", 1.0),
+    ("5 分钟", 5.0),
+    ("10 分钟", 10.0),
 ];
 #[cfg(any(windows, target_os = "macos"))]
-const SPIN_OPTS: [(&str, f32); 4] = [
-    ("Off", 0.0),
-    ("Medium", 0.6),
-    ("High", 0.9),
-    ("Extreme", 0.98),
-];
+const SPIN_OPTS: [(&str, f32); 4] = [("关闭", 0.0), ("中等", 0.6), ("高速", 0.9), ("极限", 0.98)];
 
 #[cfg(any(windows, target_os = "macos"))]
 struct Tray {
@@ -1442,7 +1552,12 @@ struct Tray {
 /// AppKit with NSCGSPanic (confirmed on Monterey), and winit only sets up
 /// NSApplication when the loop runs.
 #[cfg(any(windows, target_os = "macos"))]
-fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -> Tray {
+fn build_tray(
+    monitor_labels: &[String],
+    current_monitor: usize,
+    current_size: usize,
+    pinned: bool,
+) -> Tray {
     use tray_icon::{
         menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
         Icon, TrayIconBuilder,
@@ -1455,7 +1570,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         presets.push(item);
     }
     menu.append(&PredefinedMenuItem::separator()).unwrap();
-    // stepped option submenus; default checked = Medium/Normal/Unlimited/Off
+    // stepped option submenus; defaults are supplied by current state
     let sub = |title: &str, names: &[&str], default: usize| -> Vec<CheckMenuItem> {
         let submenu = Submenu::new(title, true);
         let items: Vec<CheckMenuItem> = names
@@ -1469,26 +1584,26 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         menu.append(&submenu).unwrap();
         items
     };
-    let sizes = sub("Size", &SIZES.map(|s| s.0), 1);
-    let speeds = sub("Speed", &SPEEDS.map(|s| s.0), 1);
-    let fps = sub("FPS", &FPS_OPTS.map(|s| s.0), 2);
-    let idles = sub("Screensaver", &IDLE_OPTS.map(|s| s.0), 0);
-    let spins = sub("Spin", &SPIN_OPTS.map(|s| s.0), 0);
+    let sizes = sub("大小", &SIZE_TIERS.map(|tier| tier.label), current_size);
+    let speeds = sub("速度", &SPEEDS.map(|s| s.0), 1);
+    let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), 2);
+    let idles = sub("屏幕保护", &IDLE_OPTS.map(|s| s.0), 0);
+    let spins = sub("旋转", &SPIN_OPTS.map(|s| s.0), 0);
     let positions = sub(
-        "Position",
-        &["Auto drift", "Pinned (Ctrl+Shift to place)"],
+        "位置",
+        &["自动漂移", "固定（按 Ctrl+Shift 放置）"],
         if pinned { 1 } else { 0 },
     );
     let monitors = if monitor_labels.len() > 1 {
         let labels: Vec<&str> = monitor_labels.iter().map(|s| s.as_str()).collect();
-        sub("Monitor", &labels, current_monitor)
+        sub("显示器", &labels, current_monitor)
     } else {
         Vec::new()
     };
     menu.append(&PredefinedMenuItem::separator()).unwrap();
-    let open_cfg = MenuItem::new("Open Config File", true, None);
+    let open_cfg = MenuItem::new("打开配置文件", true, None);
     menu.append(&open_cfg).unwrap();
-    let quit = MenuItem::new("Quit", true, None);
+    let quit = MenuItem::new("退出", true, None);
     menu.append(&quit).unwrap();
     let icon = Icon::from_rgba(tray_icon_rgba(32), 32, 32).unwrap();
     let tray = TrayIconBuilder::new()
@@ -1496,7 +1611,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         .with_tooltip(concat!(
             "Black Hole Trash ",
             env!("CARGO_PKG_VERSION"),
-            " - right-click for options"
+            " - 右键打开设置"
         ))
         .with_icon(icon)
         .build()
@@ -1514,6 +1629,13 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         monitors,
         open_cfg_id: open_cfg.id().clone(),
         quit_id: quit.id().clone(),
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn check_tray_option(items: &[tray_icon::menu::CheckMenuItem], selected: usize) {
+    for (index, item) in items.iter().enumerate() {
+        item.set_checked(index == selected);
     }
 }
 
@@ -1625,7 +1747,7 @@ fn main() {
         state.set_preset(i);
     }
     if let Some(v) = startup_cfg.size {
-        state.hole_radius = v.clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
+        state.set_size_level(nearest_size_level(v));
     }
     if let Some(v) = startup_cfg.drift_speed {
         state.drift_speed = v;
@@ -1720,7 +1842,7 @@ fn main() {
         Event::NewEvents(winit::event::StartCause::Init) => {
             #[cfg(any(windows, target_os = "macos"))]
             {
-                let mut labels = vec!["All monitors".to_string()];
+                let mut labels = vec!["所有显示器".to_string()];
                 labels.extend(
                     monitors
                         .iter()
@@ -1731,7 +1853,12 @@ fn main() {
                     None => 0,
                     Some(i) => i + 1,
                 };
-                tray = Some(build_tray(&labels, checked, state.pinned_px.is_some()));
+                tray = Some(build_tray(
+                    &labels,
+                    checked,
+                    state.size_level,
+                    state.pinned_px.is_some(),
+                ));
             }
         }
         Event::WindowEvent { event, window_id } => {
@@ -1807,6 +1934,13 @@ fn main() {
                                     "moved {} item(s) to the Recycle Bin",
                                     result.paths.len()
                                 );
+                                if let Some(level) =
+                                    state.absorb_successful_items(result.paths.len())
+                                {
+                                    if let Some(t) = &tray {
+                                        check_tray_option(&t.sizes, level);
+                                    }
+                                }
                             } else {
                                 log::error!(
                                     "recycle rejected for {} item(s): {}",
@@ -1892,7 +2026,7 @@ fn main() {
                     controller.set_suspended(platform::windows::DropWindow::is_dragging());
                     controller.set_field(
                         state.center_px,
-                        state.hole_radius as f64 * state.primary_h,
+                        state.current_hole_radius() as f64 * state.primary_h,
                         overlay_visible && state.pinned_px.is_some(),
                     );
                     state.cursor_snapshot = controller.snapshot();
@@ -1971,7 +2105,7 @@ fn main() {
             if update_item.is_none() {
                 if let (Some(t), Some(ver)) = (&tray, update_available.lock().unwrap().clone()) {
                     let item = tray_icon::menu::MenuItem::new(
-                        format!("Update available: {ver}"),
+                        format!("发现新版本：{ver}"),
                         true,
                         None,
                     );
@@ -1992,11 +2126,6 @@ fn main() {
                             continue;
                         }
                     }
-                    let check_one = |items: &[tray_icon::menu::CheckMenuItem], idx: usize| {
-                        for (j, it) in items.iter().enumerate() {
-                            it.set_checked(j == idx);
-                        }
-                    };
                     if ev.id == t.quit_id {
                         elwt.exit();
                     } else if ev.id == t.open_cfg_id {
@@ -2012,29 +2141,29 @@ fn main() {
                         }
                     } else if let Some(idx) = t.presets.iter().position(|it| it.id() == &ev.id) {
                         state.set_preset(idx);
-                        check_one(&t.presets, idx);
+                        check_tray_option(&t.presets, idx);
                     } else if let Some(idx) = t.sizes.iter().position(|it| it.id() == &ev.id) {
-                        state.hole_radius = SIZES[idx].1;
-                        check_one(&t.sizes, idx);
+                        state.set_size_level(idx);
+                        check_tray_option(&t.sizes, idx);
                     } else if let Some(idx) = t.speeds.iter().position(|it| it.id() == &ev.id) {
                         state.drift_speed = SPEEDS[idx].1;
-                        check_one(&t.speeds, idx);
+                        check_tray_option(&t.speeds, idx);
                     } else if let Some(idx) = t.fps.iter().position(|it| it.id() == &ev.id) {
                         state.fps = FPS_OPTS[idx].1;
-                        check_one(&t.fps, idx);
+                        check_tray_option(&t.fps, idx);
                     } else if let Some(idx) = t.idles.iter().position(|it| it.id() == &ev.id) {
                         state.idle_minutes = IDLE_OPTS[idx].1;
-                        check_one(&t.idles, idx);
+                        check_tray_option(&t.idles, idx);
                     } else if let Some(idx) = t.spins.iter().position(|it| it.id() == &ev.id) {
                         state.spin = SPIN_OPTS[idx].1;
-                        check_one(&t.spins, idx);
+                        check_tray_option(&t.spins, idx);
                     } else if let Some(idx) = t.positions.iter().position(|it| it.id() == &ev.id) {
                         state.pinned_px = if idx == 1 {
                             Some(state.center_px)
                         } else {
                             None
                         };
-                        check_one(&t.positions, idx);
+                        check_tray_option(&t.positions, idx);
                     } else if let Some(idx) = t.monitors.iter().position(|it| it.id() == &ev.id) {
                         let sel = if idx == 0 { None } else { Some(idx - 1) };
                         if sel != current_sel {
@@ -2048,7 +2177,7 @@ fn main() {
                             }
                             current_sel = sel;
                         }
-                        check_one(&t.monitors, idx);
+                        check_tray_option(&t.monitors, idx);
                     }
                 }
                 // placement hotkey pins the hole; mirror that in the menu
@@ -2084,10 +2213,13 @@ fn main() {
                                     }
                                 }
                                 if cfg.size != prev_cfg.size {
-                                    state.hole_radius = cfg
-                                        .size
-                                        .unwrap_or(DEFAULT_SIZE)
-                                        .clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
+                                    let level =
+                                        cfg.size.map(nearest_size_level).unwrap_or_default();
+                                    state.set_size_level(level);
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(t) = &tray {
+                                        check_tray_option(&t.sizes, level);
+                                    }
                                 }
                                 if cfg.drift_speed != prev_cfg.drift_speed {
                                     state.drift_speed =
@@ -2185,4 +2317,96 @@ fn main() {
         _ => {}
     });
     run_result.unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.000_001,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn size_growth_uses_requested_swallowed_item_thresholds() {
+        let cases = [
+            (0, 0),
+            (1, 1),
+            (2, 1),
+            (3, 2),
+            (4, 2),
+            (5, 3),
+            (9, 3),
+            (10, 4),
+            (19, 4),
+            (20, 5),
+            (usize::MAX, 5),
+        ];
+        for (total, expected) in cases {
+            assert_eq!(size_level_for_total(total), expected);
+        }
+    }
+
+    #[test]
+    fn size_growth_has_six_requested_radii() {
+        assert_eq!(SIZE_TIERS.len(), 6);
+        for (level, multiplier) in [1.0, 1.25, 1.5, 1.75, 2.0, 4.0].into_iter().enumerate() {
+            assert_close(size_radius(level), MIN_TRASH_SIZE * multiplier);
+        }
+    }
+
+    #[test]
+    fn size_growth_snaps_legacy_config_to_nearest_tier() {
+        assert_eq!(nearest_size_level(0.011), 0);
+        assert_eq!(nearest_size_level(0.014), 1);
+        assert_eq!(nearest_size_level(0.018), 3);
+        assert_eq!(nearest_size_level(1.0), 5);
+    }
+
+    #[test]
+    fn size_growth_animation_uses_smooth_four_tenths_transition() {
+        assert_close(animated_radius(1.0, 2.0, 0.0), 1.0);
+        assert_close(animated_radius(1.0, 2.0, 0.2), 1.5);
+        assert_close(animated_radius(1.0, 2.0, 0.4), 2.0);
+        assert_close(animated_radius(1.0, 2.0, 2.0), 2.0);
+    }
+
+    #[test]
+    fn swallowed_progress_caps_at_twenty_without_overflow() {
+        assert_eq!(swallowed_progress_after_success(5, 8), (13, 4));
+        assert_eq!(swallowed_progress_after_success(19, usize::MAX), (20, 5));
+    }
+
+    #[test]
+    fn swallowed_progress_crosses_multiple_tiers_directly() {
+        assert_eq!(swallowed_progress_after_success(0, 20), (20, 5));
+    }
+
+    #[test]
+    fn swallowed_progress_manual_tiers_have_matching_start_counts() {
+        assert_eq!(SIZE_TIERS.map(|tier| tier.threshold), [0, 1, 3, 5, 10, 20]);
+    }
+
+    #[test]
+    fn tray_labels_are_chinese() {
+        let labels = PRESETS
+            .iter()
+            .map(|preset| preset.0)
+            .chain(SIZE_TIERS.iter().map(|tier| tier.label))
+            .chain(SPEEDS.iter().map(|option| option.0))
+            .chain(FPS_OPTS.iter().map(|option| option.0))
+            .chain(IDLE_OPTS.iter().map(|option| option.0))
+            .chain(SPIN_OPTS.iter().map(|option| option.0));
+        for label in labels {
+            assert!(
+                label
+                    .chars()
+                    .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+                "tray label is not Chinese: {label}"
+            );
+        }
+    }
 }

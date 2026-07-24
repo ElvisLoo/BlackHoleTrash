@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add five animated black-hole growth tiers driven by successful session recycle counts, expose the same five tiers for manual selection, and localize the tray UI to Simplified Chinese.
+**Goal:** Add six animated black-hole growth tiers driven by successful session recycle counts, expose the same six tiers through the original tray size path, and localize the tray UI to Simplified Chinese.
 
 **Architecture:** Define one `SIZE_TIERS` table and pure mapping/interpolation helpers in `src/main.rs`. `State` owns session progress plus a radius transition, and all consumers read its animated radius. Successful recycle events, tray choices, and hot-reloaded legacy sizes all update the same state so progress, target radius, and menu selection cannot diverge.
 
@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Define and animate the five size tiers
+### Task 1: Define and animate the six size tiers
 
 **Files:**
 - Modify: `src/main.rs:81-87`
@@ -21,7 +21,7 @@
 
 - [ ] **Step 1: Write failing pure-function tests**
 
-Add tests asserting `size_level_for_total` maps `0, 1..=2, 3..=4, 5..=9, 10+` to levels `0..=4`, `size_radius` returns `0.011 * [1.0, 1.25, 1.5, 1.75, 2.0]`, `nearest_size_level` snaps old numeric config values, and `animated_radius` returns the start at `0.0`, a smooth midpoint at `0.2`, and the target at `0.4` seconds.
+Add tests asserting `size_level_for_total` maps `0, 1..=2, 3..=4, 5..=9, 10..=19, 20+` to levels `0..=5`, `size_radius` returns `0.011 * [1.0, 1.25, 1.5, 1.75, 2.0, 4.0]`, `nearest_size_level` snaps old numeric config values, and `animated_radius` returns the start at `0.0`, a smooth midpoint at `0.2`, and the target at `0.4` seconds.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -31,7 +31,7 @@ Expected: compilation fails because the tier helpers do not exist.
 
 - [ ] **Step 3: Add the shared tier model and pure helpers**
 
-Create `SizeTier { label: &'static str, threshold: usize, multiplier: f32 }`, the five Chinese tier entries, `GROWTH_DURATION_SEC: f32 = 0.4`, and these functions:
+Create `SizeTier { label: &'static str, threshold: usize, multiplier: f32 }`, the six Chinese tier entries, `GROWTH_DURATION_SEC: f32 = 0.4`, and these functions:
 
 ```rust
 fn size_level_for_total(total: usize) -> usize;
@@ -63,7 +63,7 @@ Expected: all size-growth tests pass.
 
 - [ ] **Step 1: Write failing progress tests**
 
-Add tests proving a successful count is saturating and capped at ten, crossing several thresholds chooses only the final level, and manual levels correspond to progress values `0, 1, 3, 5, 10`.
+Add tests proving a successful count is saturating and capped at twenty, crossing several thresholds chooses only the final level, and manual levels correspond to progress values `0, 1, 3, 5, 10, 20`.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -100,7 +100,7 @@ Expected: all existing and new tests pass.
 
 - [ ] **Step 1: Write failing label tests**
 
-Assert that all eight preset display names, five size labels, speed/FPS/screensaver/spin/position labels, and top-level tray titles contain no ASCII-only English UI text. Keep `PRESET_KEYS` unchanged.
+Assert that all eight preset display names, six size labels, speed/FPS/screensaver/spin/position labels, and top-level tray titles contain no ASCII-only English UI text. Keep `PRESET_KEYS` unchanged.
 
 - [ ] **Step 2: Run tests and verify RED**
 
