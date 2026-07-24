@@ -80,6 +80,7 @@ pub struct Uniforms {
 
 const MIN_TRASH_SIZE: f32 = 0.011;
 const DEFAULT_SIZE: f32 = MIN_TRASH_SIZE;
+const DEFAULT_FPS: u32 = 60;
 const GROWTH_DURATION_SEC: f32 = 0.4;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
@@ -165,6 +166,18 @@ fn swallowed_progress_after_success(current: usize, added: usize) -> (usize, usi
     (total, size_level_for_total(total))
 }
 
+fn normalize_fps(value: Option<u32>) -> u32 {
+    match value {
+        Some(30) => 30,
+        _ => DEFAULT_FPS,
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn fps_option_index(fps: u32) -> usize {
+    usize::from(fps != 30)
+}
+
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
 const PRESETS: [(&str, [f32; 14]); 8] = [
@@ -239,7 +252,7 @@ struct FileCfg {
     drift_speed: Option<f32>,
     drift_x: Option<f32>,
     drift_y: Option<f32>,
-    fps: Option<u32>,
+    fps: Option<Option<u32>>,
     idle_minutes: Option<f32>,
     check_updates: Option<u32>,
     pin_x: Option<f32>,
@@ -263,7 +276,7 @@ fn parse_config(text: &str) -> FileCfg {
             "drift_speed" => cfg.drift_speed = v.parse().ok(),
             "drift_x" => cfg.drift_x = v.parse().ok(),
             "drift_y" => cfg.drift_y = v.parse().ok(),
-            "fps" => cfg.fps = v.parse().ok(),
+            "fps" => cfg.fps = Some(v.parse().ok()),
             "idle_minutes" => cfg.idle_minutes = v.parse().ok(),
             "check_updates" => cfg.check_updates = v.parse().ok(),
             "pin_x" => cfg.pin_x = v.parse().ok(),
@@ -306,8 +319,8 @@ const DEFAULT_CONFIG: &str = "\
 #drift_x = 0.20
 #drift_y = 0.14
 
-# Frame rate cap (saves battery). 0 = uncapped (monitor refresh rate).
-#fps = 0
+# Frame rate cap: 30 or 60. Other values fall back to 60.
+#fps = 60
 
 # Screensaver mode: appear only after this many minutes without any
 # keyboard/mouse input, and vanish on the first input. 0 = always visible.
@@ -406,7 +419,7 @@ struct State {
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
-    fps: u32,                                 // 0 = uncapped (vsync only)
+    fps: u32,                                 // always 30 or 60
     spin: f32,                                // Kerr spin 0..0.99
     idle_minutes: f32, // 0 = always visible; >0 = appear after this much idle
     appear_start: Option<std::time::Instant>, // grow-in animation anchor
@@ -604,7 +617,7 @@ impl State {
             drift_speed: DEFAULT_DRIFT_SPEED,
             drift_x: DEFAULT_DRIFT_X,
             drift_y: DEFAULT_DRIFT_Y,
-            fps: 0,
+            fps: DEFAULT_FPS,
             spin: 0.0,
             idle_minutes: 0.0,
             appear_start: None,
@@ -1517,7 +1530,7 @@ fn tray_icon_rgba(size: u32) -> Vec<u8> {
 #[cfg(any(windows, target_os = "macos"))]
 const SPEEDS: [(&str, f32); 3] = [("慢速", 0.4), ("正常", 1.0), ("快速", 2.2)];
 #[cfg(any(windows, target_os = "macos"))]
-const FPS_OPTS: [(&str, u32); 3] = [("30 帧", 30), ("60 帧", 60), ("不限帧率", 0)];
+const FPS_OPTS: [(&str, u32); 2] = [("30 帧", 30), ("60 帧", 60)];
 #[cfg(any(windows, target_os = "macos"))]
 const IDLE_OPTS: [(&str, f32); 4] = [
     ("关闭", 0.0),
@@ -1556,6 +1569,7 @@ fn build_tray(
     monitor_labels: &[String],
     current_monitor: usize,
     current_size: usize,
+    current_fps: u32,
     pinned: bool,
 ) -> Tray {
     use tray_icon::{
@@ -1586,7 +1600,11 @@ fn build_tray(
     };
     let sizes = sub("大小", &SIZE_TIERS.map(|tier| tier.label), current_size);
     let speeds = sub("速度", &SPEEDS.map(|s| s.0), 1);
-    let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), 2);
+    let fps = sub(
+        "帧率",
+        &FPS_OPTS.map(|option| option.0),
+        fps_option_index(current_fps),
+    );
     let idles = sub("屏幕保护", &IDLE_OPTS.map(|s| s.0), 0);
     let spins = sub("旋转", &SPIN_OPTS.map(|s| s.0), 0);
     let positions = sub(
@@ -1758,9 +1776,7 @@ fn main() {
     if let Some(v) = startup_cfg.drift_y {
         state.drift_y = v;
     }
-    if let Some(v) = startup_cfg.fps {
-        state.fps = v;
-    }
+    state.fps = normalize_fps(startup_cfg.fps.flatten());
     if let Some(v) = startup_cfg.idle_minutes {
         state.idle_minutes = v;
     }
@@ -1857,6 +1873,7 @@ fn main() {
                     &labels,
                     checked,
                     state.size_level,
+                    state.fps,
                     state.pinned_px.is_some(),
                 ));
             }
@@ -2232,7 +2249,14 @@ fn main() {
                                     state.drift_y = cfg.drift_y.unwrap_or(DEFAULT_DRIFT_Y);
                                 }
                                 if cfg.fps != prev_cfg.fps {
-                                    state.fps = cfg.fps.unwrap_or(0);
+                                    state.fps = normalize_fps(cfg.fps.flatten());
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(t) = &tray {
+                                        check_tray_option(
+                                            &t.fps,
+                                            fps_option_index(state.fps),
+                                        );
+                                    }
                                 }
                                 if cfg.idle_minutes != prev_cfg.idle_minutes {
                                     state.idle_minutes = cfg.idle_minutes.unwrap_or(0.0);
@@ -2290,19 +2314,13 @@ fn main() {
                 }
             }
 
-            // frame pacing: hidden -> low-power 0.5s idle polling (no
-            // rendering at all); uncapped -> vsync-bound Poll; capped ->
-            // wake at the next frame deadline (saves battery)
+            // Frame pacing: hidden -> low-power 0.5s idle polling (no
+            // rendering); visible -> wake at the next 30/60 FPS deadline.
             let visible = state.panes.iter().any(|p| p.visible);
             if !visible {
                 elwt.set_control_flow(ControlFlow::WaitUntil(
                     std::time::Instant::now() + std::time::Duration::from_millis(500),
                 ));
-            } else if state.fps == 0 {
-                for p in state.panes.iter().filter(|p| p.visible) {
-                    p.window.request_redraw();
-                }
-                elwt.set_control_flow(ControlFlow::Poll);
             } else {
                 let now = std::time::Instant::now();
                 if now >= next_frame {
@@ -2408,5 +2426,26 @@ mod tests {
                 "tray label is not Chinese: {label}"
             );
         }
+    }
+
+    #[test]
+    fn fps_policy_only_allows_thirty_or_sixty() {
+        assert_eq!(FPS_OPTS, [("30 帧", 30), ("60 帧", 60)]);
+        assert_eq!(normalize_fps(None), 60);
+        assert_eq!(normalize_fps(Some(0)), 60);
+        assert_eq!(normalize_fps(Some(30)), 30);
+        assert_eq!(normalize_fps(Some(60)), 60);
+        assert_eq!(normalize_fps(Some(120)), 60);
+        assert_eq!(fps_option_index(30), 0);
+        assert_eq!(fps_option_index(60), 1);
+    }
+
+    #[test]
+    fn fps_config_distinguishes_absent_invalid_and_valid_values() {
+        assert_eq!(parse_config("").fps, None);
+        assert_eq!(parse_config("fps = -1").fps, Some(None));
+        assert_eq!(parse_config("fps = nope").fps, Some(None));
+        assert_eq!(parse_config("fps = 30").fps, Some(Some(30)));
+        assert_eq!(parse_config("fps = 60").fps, Some(Some(60)));
     }
 }
