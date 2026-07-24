@@ -88,7 +88,7 @@ const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
 
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
-const PRESETS: [(&str, [f32; 14]); 8] = [
+const PRESETS: [(&str, [f32; 14]); 9] = [
     (
         "地狱火",
         [
@@ -111,6 +111,12 @@ const PRESETS: [(&str, [f32; 14]); 8] = [
         "M87* 甜甜圈",
         [
             3800.0, 0.55, -0.30, 2.2, 6.0, 0.45, 0.90, 3.5, 1.6, 0.4, 3.0, 2.5, 1.10, 0.0,
+        ],
+    ),
+    (
+        "M87* 照片",
+        [
+            3200.0, 0.70, 0.50, 2.6, 5.5, 0.25, 0.95, 4.0, 2.2, 0.2, 2.0, 1.5, 0.85, 0.0,
         ],
     ),
     (
@@ -138,14 +144,15 @@ const PRESETS: [(&str, [f32; 14]); 8] = [
         ],
     ),
 ];
-const DEFAULT_PRESET: usize = 1; // Gargantua
+const DEFAULT_PRESET: usize = 1; // 卡冈图雅
 
 // config-file keys for the presets, in PRESETS order
-const PRESET_KEYS: [&str; 8] = [
+const PRESET_KEYS: [&str; 9] = [
     "inferno",
     "gargantua",
     "quasar",
     "m87",
+    "m87_photo",
     "blazar",
     "ember",
     "lens",
@@ -214,7 +221,7 @@ const DEFAULT_CONFIG: &str = "\
 # Remove the leading # to activate a line; active values take priority
 # over the tray menu until they change again.
 
-# Disk look: inferno | gargantua | quasar | m87 | blazar | ember | lens | zen
+# Disk look: inferno | gargantua | quasar | m87 | m87_photo | blazar | ember | lens | zen
 #preset = gargantua
 
 # Shadow radius as a fraction of screen height.
@@ -1550,12 +1557,14 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
         Icon, TrayIconBuilder,
     };
     let menu = Menu::new();
+    let preset_sub = Submenu::new("类型", true);
     let mut presets: Vec<CheckMenuItem> = Vec::new();
     for (i, (name, _)) in PRESETS.iter().enumerate() {
         let item = CheckMenuItem::new(*name, true, i == DEFAULT_PRESET, None);
-        menu.append(&item).unwrap();
+        preset_sub.append(&item).unwrap();
         presets.push(item);
     }
+    menu.append(&preset_sub).unwrap();
     menu.append(&PredefinedMenuItem::separator()).unwrap();
     // stepped option submenus; default checked = Medium/Normal/Unlimited/Off
     let sub = |title: &str, names: &[&str], default: usize| -> Vec<CheckMenuItem> {
