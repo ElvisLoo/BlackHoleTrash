@@ -177,6 +177,19 @@ fn normalize_fps(value: Option<u32>) -> u32 {
     }
 }
 
+fn normalize_always_on_top(value: Option<u32>) -> bool {
+    value == Some(1)
+}
+
+fn should_show_overlay(
+    screensaver_wants_visible: bool,
+    always_on_top: bool,
+    black_hole_occluded: bool,
+    pane_ready: bool,
+) -> bool {
+    pane_ready && screensaver_wants_visible && (always_on_top || !black_hole_occluded)
+}
+
 #[cfg(any(windows, target_os = "macos"))]
 fn fps_option_index(fps: u32) -> usize {
     usize::from(fps != 30)
@@ -257,6 +270,7 @@ struct FileCfg {
     drift_x: Option<f32>,
     drift_y: Option<f32>,
     fps: Option<Option<u32>>,
+    always_on_top: Option<u32>,
     idle_minutes: Option<f32>,
     check_updates: Option<u32>,
     pin_x: Option<f32>,
@@ -281,6 +295,7 @@ fn parse_config(text: &str) -> FileCfg {
             "drift_x" => cfg.drift_x = v.parse().ok(),
             "drift_y" => cfg.drift_y = v.parse().ok(),
             "fps" => cfg.fps = Some(v.parse().ok()),
+            "always_on_top" => cfg.always_on_top = v.parse().ok(),
             "idle_minutes" => cfg.idle_minutes = v.parse().ok(),
             "check_updates" => cfg.check_updates = v.parse().ok(),
             "pin_x" => cfg.pin_x = v.parse().ok(),
@@ -325,6 +340,10 @@ const DEFAULT_CONFIG: &str = "\
 
 # Frame rate cap: 30 or 60. Missing and other values fall back to 30.
 #fps = 30
+
+# Window mode: 0 = hide when an app covers the hole (default),
+# 1 = keep the hole above ordinary windows.
+#always_on_top = 0
 
 # Screensaver mode: appear only after this many minutes without any
 # keyboard/mouse input, and vanish on the first input. 0 = always visible.
@@ -1521,6 +1540,7 @@ const SPIN_OPTS: [(&str, f32); 4] = [("关闭", 0.0), ("中等", 0.6), ("高速"
 struct Tray {
     _icon: tray_icon::TrayIcon,
     menu: tray_icon::menu::Menu,
+    always_on_top: Option<tray_icon::menu::CheckMenuItem>,
     presets: Vec<tray_icon::menu::CheckMenuItem>,
     sizes: Vec<tray_icon::menu::CheckMenuItem>,
     speeds: Vec<tray_icon::menu::CheckMenuItem>,
@@ -1547,12 +1567,21 @@ fn build_tray(
     current_size: usize,
     current_fps: u32,
     pinned: bool,
+    always_on_top: bool,
 ) -> Tray {
     use tray_icon::{
         menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
         Icon, TrayIconBuilder,
     };
     let menu = Menu::new();
+    let always_on_top = if cfg!(windows) {
+        let item = CheckMenuItem::new("始终置顶", true, always_on_top, None);
+        menu.append(&item).unwrap();
+        menu.append(&PredefinedMenuItem::separator()).unwrap();
+        Some(item)
+    } else {
+        None
+    };
     let mut presets: Vec<CheckMenuItem> = Vec::new();
     for (i, (name, _)) in PRESETS.iter().enumerate() {
         let item = CheckMenuItem::new(*name, true, i == DEFAULT_PRESET, None);
@@ -1613,6 +1642,7 @@ fn build_tray(
     Tray {
         _icon: tray,
         menu,
+        always_on_top,
         presets,
         sizes,
         speeds,
@@ -1685,6 +1715,7 @@ fn main() {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|t| parse_config(&t))
         .unwrap_or_default();
+    let mut always_on_top = normalize_always_on_top(startup_cfg.always_on_top);
     let mut cfg_mtime: Option<std::time::SystemTime> = None;
     let mut last_cfg_check = std::time::Instant::now();
     let mut next_frame = std::time::Instant::now();
@@ -1863,6 +1894,7 @@ fn main() {
                     state.size_level,
                     state.fps,
                     state.pinned_px.is_some(),
+                    always_on_top,
                 ));
             }
         }
@@ -1978,7 +2010,9 @@ fn main() {
             }
 
             #[cfg(windows)]
-            if last_occlusion_check.elapsed() >= OCCLUSION_CHECK_INTERVAL {
+            if always_on_top {
+                black_hole_occluded = false;
+            } else if last_occlusion_check.elapsed() >= OCCLUSION_CHECK_INTERVAL {
                 last_occlusion_check = std::time::Instant::now();
                 let visible_radius = state.current_hole_radius() as f64
                     * state.primary_h
@@ -2004,10 +2038,9 @@ fn main() {
             let screensaver_wants_visible =
                 !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
             #[cfg(windows)]
-            let desktop_uncovered = !black_hole_occluded;
+            let occluded = black_hole_occluded;
             #[cfg(not(windows))]
-            let desktop_uncovered = true;
-            let wanted = screensaver_wants_visible && desktop_uncovered;
+            let occluded = false;
             let any_visible = state.panes.iter().any(|p| p.visible);
             for i in 0..state.panes.len() {
                 let ready = { state.panes[i].shared.lock().unwrap().width > 0 };
@@ -2019,7 +2052,8 @@ fn main() {
                              showing test pattern; check 'capture:' messages above"
                     );
                 }
-                let show = wanted && booted;
+                let show =
+                    should_show_overlay(screensaver_wants_visible, always_on_top, occluded, booted);
                 if show && !state.panes[i].visible {
                     if idle_mode && !any_visible {
                         // grow in from nothing when appearing out of idle
@@ -2178,6 +2212,21 @@ fn main() {
                     }
                     if ev.id == t.quit_id {
                         elwt.exit();
+                    } else if t
+                        .always_on_top
+                        .as_ref()
+                        .is_some_and(|item| item.id() == &ev.id)
+                    {
+                        always_on_top = !always_on_top;
+                        if let Some(item) = &t.always_on_top {
+                            item.set_checked(always_on_top);
+                        }
+                        #[cfg(windows)]
+                        {
+                            black_hole_occluded = false;
+                            last_occlusion_check =
+                                std::time::Instant::now() - OCCLUSION_CHECK_INTERVAL;
+                        }
                     } else if ev.id == t.open_cfg_id {
                         if let Some(path) = &cfg_path {
                             ensure_config_file(path);
@@ -2289,6 +2338,22 @@ fn main() {
                                             &t.fps,
                                             fps_option_index(state.fps),
                                         );
+                                    }
+                                }
+                                if cfg.always_on_top != prev_cfg.always_on_top {
+                                    always_on_top =
+                                        normalize_always_on_top(cfg.always_on_top);
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(item) =
+                                        tray.as_ref().and_then(|t| t.always_on_top.as_ref())
+                                    {
+                                        item.set_checked(always_on_top);
+                                    }
+                                    #[cfg(windows)]
+                                    {
+                                        black_hole_occluded = false;
+                                        last_occlusion_check = std::time::Instant::now()
+                                            - OCCLUSION_CHECK_INTERVAL;
                                     }
                                 }
                                 if cfg.idle_minutes != prev_cfg.idle_minutes {
@@ -2485,5 +2550,26 @@ mod tests {
         assert_eq!(parse_config("fps = nope").fps, Some(None));
         assert_eq!(parse_config("fps = 30").fps, Some(Some(30)));
         assert_eq!(parse_config("fps = 60").fps, Some(Some(60)));
+    }
+
+    #[test]
+    fn always_on_top_defaults_off_and_only_one_enables_it() {
+        assert_eq!(parse_config("").always_on_top, None);
+        assert_eq!(parse_config("always_on_top = 0").always_on_top, Some(0));
+        assert_eq!(parse_config("always_on_top = 1").always_on_top, Some(1));
+        assert_eq!(parse_config("always_on_top = nope").always_on_top, None);
+        assert!(!normalize_always_on_top(None));
+        assert!(!normalize_always_on_top(Some(0)));
+        assert!(normalize_always_on_top(Some(1)));
+        assert!(!normalize_always_on_top(Some(2)));
+    }
+
+    #[test]
+    fn visibility_policy_respects_occlusion_unless_always_on_top() {
+        assert!(should_show_overlay(true, false, false, true));
+        assert!(!should_show_overlay(true, false, true, true));
+        assert!(should_show_overlay(true, true, true, true));
+        assert!(!should_show_overlay(false, true, false, true));
+        assert!(!should_show_overlay(true, true, false, false));
     }
 }

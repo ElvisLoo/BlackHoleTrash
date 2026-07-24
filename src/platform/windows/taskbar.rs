@@ -144,8 +144,6 @@ mod tests {
     fn compliant_style_is_recognized() {
         assert!(is_taskbar_excluded(WS_EX_TOOLWINDOW.0));
         assert!(!is_taskbar_excluded(WS_EX_APPWINDOW.0));
-        assert!(!is_taskbar_excluded(
-            WS_EX_TOOLWINDOW.0 | WS_EX_APPWINDOW.0
-        ));
+        assert!(!is_taskbar_excluded(WS_EX_TOOLWINDOW.0 | WS_EX_APPWINDOW.0));
     }
 }

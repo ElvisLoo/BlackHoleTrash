@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT,
-    LLKHF_INJECTED, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_INJECTED,
+    WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(350);
@@ -83,10 +83,7 @@ impl DoubleCtrlState {
 }
 
 fn is_ctrl(vk: u32) -> bool {
-    matches!(
-        vk,
-        VK_CONTROL_CODE | VK_LCONTROL_CODE | VK_RCONTROL_CODE
-    )
+    matches!(vk, VK_CONTROL_CODE | VK_LCONTROL_CODE | VK_RCONTROL_CODE)
 }
 
 struct HookState {
@@ -150,11 +147,7 @@ impl Drop for CtrlDoubleTapController {
     }
 }
 
-unsafe extern "system" fn keyboard_hook(
-    n_code: i32,
-    w_param: WPARAM,
-    l_param: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn keyboard_hook(n_code: i32, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
     if n_code < 0 {
         return unsafe { CallNextHookEx(None, n_code, w_param, l_param) };
     }

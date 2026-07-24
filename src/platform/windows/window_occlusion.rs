@@ -102,15 +102,8 @@ struct EnumContext {
     occluded: bool,
 }
 
-pub fn is_black_hole_occluded(
-    center: [f64; 2],
-    radius: f64,
-) -> windows::core::Result<bool> {
-    if !center[0].is_finite()
-        || !center[1].is_finite()
-        || !radius.is_finite()
-        || radius <= 0.0
-    {
+pub fn is_black_hole_occluded(center: [f64; 2], radius: f64) -> windows::core::Result<bool> {
+    if !center[0].is_finite() || !center[1].is_finite() || !radius.is_finite() || radius <= 0.0 {
         return Ok(false);
     }
     let mut context = EnumContext {
