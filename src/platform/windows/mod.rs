@@ -1,3 +1,4 @@
+mod capture_exclusion;
 mod cursor_gravity;
 mod drop_window;
 mod ole_drop_target;
