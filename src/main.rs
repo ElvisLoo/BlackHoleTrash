@@ -80,7 +80,7 @@ pub struct Uniforms {
 
 const MIN_TRASH_SIZE: f32 = 0.011;
 const DEFAULT_SIZE: f32 = MIN_TRASH_SIZE;
-const DEFAULT_FPS: u32 = 60;
+const DEFAULT_FPS: u32 = 30;
 const GROWTH_DURATION_SEC: f32 = 0.4;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
@@ -168,7 +168,7 @@ fn swallowed_progress_after_success(current: usize, added: usize) -> (usize, usi
 
 fn normalize_fps(value: Option<u32>) -> u32 {
     match value {
-        Some(30) => 30,
+        Some(60) => 60,
         _ => DEFAULT_FPS,
     }
 }
@@ -319,8 +319,8 @@ const DEFAULT_CONFIG: &str = "\
 #drift_x = 0.20
 #drift_y = 0.14
 
-# Frame rate cap: 30 or 60. Other values fall back to 60.
-#fps = 60
+# Frame rate cap: 30 or 60. Missing and other values fall back to 30.
+#fps = 30
 
 # Screensaver mode: appear only after this many minutes without any
 # keyboard/mouse input, and vanish on the first input. 0 = always visible.
@@ -2431,11 +2431,12 @@ mod tests {
     #[test]
     fn fps_policy_only_allows_thirty_or_sixty() {
         assert_eq!(FPS_OPTS, [("30 帧", 30), ("60 帧", 60)]);
-        assert_eq!(normalize_fps(None), 60);
-        assert_eq!(normalize_fps(Some(0)), 60);
+        assert_eq!(DEFAULT_FPS, 30);
+        assert_eq!(normalize_fps(None), 30);
+        assert_eq!(normalize_fps(Some(0)), 30);
         assert_eq!(normalize_fps(Some(30)), 30);
         assert_eq!(normalize_fps(Some(60)), 60);
-        assert_eq!(normalize_fps(Some(120)), 60);
+        assert_eq!(normalize_fps(Some(120)), 30);
         assert_eq!(fps_option_index(30), 0);
         assert_eq!(fps_option_index(60), 1);
     }

@@ -74,8 +74,8 @@ The release build does not require Rust, Node.js, Python, or another external ru
 The config file is named `black-hole-trash.toml` and lives beside the executable. Changes reload automatically; common options are also available from the tray.
 
 ```toml
-# FPS accepts only 30 or 60. Missing, invalid, and other values fall back to 60.
-fps = 60
+# FPS accepts only 30 or 60. Missing, invalid, and other values fall back to 30.
+fps = 30
 
 # Size snaps to six tiers: 0.011 / 0.01375 / 0.0165 / 0.01925 / 0.022 / 0.044
 size = 0.011
