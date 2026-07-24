@@ -39,7 +39,7 @@ The per-user installer requires no administrator privileges. It is currently uns
 ## Usage
 
 1. Launch `BlackHoleTrash.exe`.
-2. Hold and drag the hole to place it. You can also hold `Ctrl+Shift` to pin it to the pointer.
+2. Hold and drag the hole to place it. You can also double-tap `Ctrl` to pin it to the pointer.
 3. Drag files, folders, or multiple items from Windows File Explorer.
 4. Release them over the event horizon to send them to the Windows Recycle Bin.
 5. Right-click the tray icon to change the visual preset, size, speed, FPS, position, and other settings.

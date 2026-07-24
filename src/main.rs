@@ -332,7 +332,7 @@ const DEFAULT_CONFIG: &str = "\
 #check_updates = 1
 
 # Placement: drag the black hole directly with the left mouse button.
-# Ctrl+Shift also moves it to the pointer. Tray > Position > Auto drift
+# Double-tap Ctrl to move it to the pointer. Tray > Position > Auto drift
 # resumes wandering.
 # Or pin a fixed spot here (0 to 1, fraction of the combined desktop).
 #pin_x = 0.5
@@ -846,19 +846,13 @@ impl State {
         ]
     }
 
-    /// Advance the hole centre: follow the cursor while the placement hotkey
-    /// is held (pinning where it lands), else glide toward the pin or the
-    /// Lissajous drift path over the whole roam box.
+    /// Advance the hole centre toward its pin or along the Lissajous drift
+    /// path over the whole roam box.
     fn tick_center(&mut self) {
         let now = std::time::Instant::now();
         let dt = (now - self.last_center_tick).as_secs_f32().min(0.1);
         self.last_center_tick = now;
 
-        if place_hotkey_held() {
-            if let Some(p) = self.cursor_px() {
-                self.pinned_px = Some(self.clamp_roam(p));
-            }
-        }
         let target = match self.pinned_px {
             Some(p) => p,
             None => {
@@ -1323,34 +1317,6 @@ fn lissa(t: f32) -> [f32; 2] {
     ]
 }
 
-/// Placement hotkey: both Ctrl and Shift held, observed globally without
-/// intercepting anything.
-#[cfg(windows)]
-fn place_hotkey_held() -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
-    unsafe {
-        (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
-            && (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn place_hotkey_held() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGEventSourceFlagsState(state: i32) -> u64;
-    }
-    const CTRL: u64 = 0x0004_0000;
-    const SHIFT: u64 = 0x0002_0000;
-    let f = unsafe { CGEventSourceFlagsState(0) }; // combined session state
-    f & CTRL != 0 && f & SHIFT != 0
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn place_hotkey_held() -> bool {
-    false
-}
-
 // ------------------------------ update check -------------------------------
 // Once a day, ask the GitHub API for the latest release tag using the OS's
 // bundled curl (no HTTP dependency in the app). If it is newer, the tray
@@ -1609,7 +1575,7 @@ fn build_tray(
     let spins = sub("旋转", &SPIN_OPTS.map(|s| s.0), 0);
     let positions = sub(
         "位置",
-        &["自动漂移", "固定（按 Ctrl+Shift 放置）"],
+        &["自动漂移", "固定（双击 Ctrl 放置）"],
         if pinned { 1 } else { 0 },
     );
     let monitors = if monitor_labels.len() > 1 {
@@ -1817,6 +1783,14 @@ fn main() {
         }
     };
     #[cfg(windows)]
+    let ctrl_double_tap = match platform::windows::CtrlDoubleTapController::new() {
+        Ok(controller) => Some(controller),
+        Err(error) => {
+            log::error!("double-Ctrl placement unavailable: {error}");
+            None
+        }
+    };
+    #[cfg(windows)]
     let mut active_generation = 0u64;
 
     // ui-side trackers for the event loop
@@ -1919,6 +1893,17 @@ fn main() {
                 if unsafe { WaitForSingleObject(HANDLE(quit_event as *mut _), 0) }.0 == 0 {
                     eprintln!("handover requested by a newer launch; exiting");
                     elwt.exit();
+                }
+            }
+            #[cfg(windows)]
+            if ctrl_double_tap
+                .as_ref()
+                .is_some_and(|controller| controller.take_triggered())
+            {
+                if let Some(point) = state.cursor_px() {
+                    let pinned = state.clamp_roam(point);
+                    state.center_px = pinned;
+                    state.pinned_px = Some(pinned);
                 }
             }
             state.tick_center();
@@ -2197,7 +2182,7 @@ fn main() {
                         check_tray_option(&t.monitors, idx);
                     }
                 }
-                // placement hotkey pins the hole; mirror that in the menu
+                // The placement gesture pins the hole; mirror that in the menu.
                 let now_pinned = state.pinned_px.is_some();
                 if now_pinned != tray_pinned_ui {
                     tray_pinned_ui = now_pinned;

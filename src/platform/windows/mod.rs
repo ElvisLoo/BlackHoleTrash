@@ -1,4 +1,5 @@
 mod capture_exclusion;
+mod ctrl_double_tap;
 mod cursor_gravity;
 mod drop_window;
 mod ole_drop_target;
@@ -9,6 +10,7 @@ pub use capture_exclusion::{
     show_failure_message as show_capture_exclusion_failure_message,
     verify as verify_capture_exclusion,
 };
+pub use ctrl_double_tap::CtrlDoubleTapController;
 pub use cursor_gravity::{CursorGravityController, CursorSnapshot, TRAIL_SAMPLES};
 pub use drop_window::DropWindow;
 pub use recycle_bin::{recycle_async, show_recycle_failure, RecycleResult};

@@ -75,7 +75,7 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VSOut {
 
 // ---------------------------------------------------------------- tunables --
 // Disk look, size and centre come from the uniforms (tray menu / config
-// file / placement hotkey); only the hole-independent knobs stay compile-time.
+// file / placement gesture); only the hole-independent knobs stay compile-time.
 const LENS_DEPTH: f32    = 13.0;   // hole-to-sky-plane distance in r_s - bigger = bends harder
 const N_STEPS: i32       = 48;     // geodesic steps per pixel (perf dial)
 const B_CRIT: f32        = 2.5980762; // critical impact parameter, r_s
