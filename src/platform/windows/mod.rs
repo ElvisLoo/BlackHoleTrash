@@ -4,6 +4,7 @@ mod cursor_gravity;
 mod drop_window;
 mod ole_drop_target;
 mod recycle_bin;
+mod window_occlusion;
 
 pub use capture_exclusion::{
     apply_and_verify as apply_capture_exclusion, show_failure as show_capture_exclusion_failure,
@@ -14,6 +15,7 @@ pub use ctrl_double_tap::CtrlDoubleTapController;
 pub use cursor_gravity::{CursorGravityController, CursorSnapshot, TRAIL_SAMPLES};
 pub use drop_window::DropWindow;
 pub use recycle_bin::{recycle_async, show_recycle_failure, RecycleResult};
+pub use window_occlusion::is_black_hole_occluded;
 
 use crossbeam_channel::{Receiver, Sender};
 use std::path::PathBuf;

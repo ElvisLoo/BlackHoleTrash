@@ -86,6 +86,10 @@ const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
 const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
+#[cfg(windows)]
+const OCCLUSION_RADIUS_MULTIPLIER: f64 = 7.5;
+#[cfg(windows)]
+const OCCLUSION_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct SizeTier {
@@ -1792,6 +1796,10 @@ fn main() {
     };
     #[cfg(windows)]
     let mut active_generation = 0u64;
+    #[cfg(windows)]
+    let mut black_hole_occluded = false;
+    #[cfg(windows)]
+    let mut last_occlusion_check = std::time::Instant::now() - OCCLUSION_CHECK_INTERVAL;
 
     // ui-side trackers for the event loop
     #[cfg_attr(not(any(windows, target_os = "macos")), allow(unused))]
@@ -1963,6 +1971,22 @@ fn main() {
                 }
             }
 
+            #[cfg(windows)]
+            if last_occlusion_check.elapsed() >= OCCLUSION_CHECK_INTERVAL {
+                last_occlusion_check = std::time::Instant::now();
+                let visible_radius = state.current_hole_radius() as f64
+                    * state.primary_h
+                    * OCCLUSION_RADIUS_MULTIPLIER;
+                black_hole_occluded = platform::windows::is_black_hole_occluded(
+                    state.center_px,
+                    visible_radius,
+                )
+                .unwrap_or_else(|error| {
+                    log::error!("window occlusion check failed: {error}");
+                    true
+                });
+            }
+
             // Visibility state machine, per pane. This must live HERE,
             // not in the render path: a hidden window gets no WM_PAINT,
             // so a render-side reveal would deadlock into invisibility.
@@ -1971,7 +1995,13 @@ fn main() {
             // wanted:  always, or only after idle_minutes without input
             let waited = state.start.elapsed().as_secs_f32();
             let idle_mode = state.idle_minutes > 0.0;
-            let wanted = !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
+            let screensaver_wants_visible =
+                !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
+            #[cfg(windows)]
+            let desktop_uncovered = !black_hole_occluded;
+            #[cfg(not(windows))]
+            let desktop_uncovered = true;
+            let wanted = screensaver_wants_visible && desktop_uncovered;
             let any_visible = state.panes.iter().any(|p| p.visible);
             for i in 0..state.panes.len() {
                 let ready = { state.panes[i].shared.lock().unwrap().width > 0 };
@@ -2303,8 +2333,12 @@ fn main() {
             // rendering); visible -> wake at the next 30/60 FPS deadline.
             let visible = state.panes.iter().any(|p| p.visible);
             if !visible {
+                #[cfg(windows)]
+                let hidden_wait = OCCLUSION_CHECK_INTERVAL;
+                #[cfg(not(windows))]
+                let hidden_wait = std::time::Duration::from_millis(500);
                 elwt.set_control_flow(ControlFlow::WaitUntil(
-                    std::time::Instant::now() + std::time::Duration::from_millis(500),
+                    std::time::Instant::now() + hidden_wait,
                 ));
             } else {
                 let now = std::time::Instant::now();
