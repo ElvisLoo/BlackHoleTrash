@@ -12,6 +12,8 @@ Black Hole Trash is a compact, draggable Windows desktop black hole and a real R
 
 [Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.4.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.4.0)
 
+For the macOS version, see [ZGhey/blackhole-mac](https://github.com/ZGhey/blackhole-mac).
+
 The per-user installer requires no administrator privileges. It is currently unsigned, so Windows SmartScreen may display a warning. Use the `.sha256` asset on the same Release page to verify the download.
 
 ## Current Features
