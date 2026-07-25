@@ -48,6 +48,7 @@ struct Uniforms {
     _pad2: f32,
     cursor: vec4<f32>,
     cursor_motion: vec4<f32>,
+    absorption_jet: vec4<f32>, // progress, batch energy, active, reserved
     cursor_trail: array<vec4<f32>, 16>,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -153,6 +154,87 @@ fn cursor_arrow_sdf(
     );
     let stem = sd_box(local - vec2<f32>(-5.0, 0.0), vec2<f32>(4.2, 1.75));
     return min(head, stem) * scale;
+}
+
+fn absorption_jet_overlay(base: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    if (u.absorption_jet.z < 0.5) {
+        return base;
+    }
+
+    let progress = clamp(u.absorption_jet.x, 0.0, 1.0);
+    let energy = clamp(u.absorption_jet.y, 1.0, 1.5);
+    let energy01 = (energy - 1.0) / 0.5;
+    let aspect = u.resolution.x / max(u.resolution.y, 1.0);
+    let center = vec2<f32>(u.center_x, u.center_y);
+    let rel = (uv - center) * vec2<f32>(aspect, 1.0);
+    let radius = max(u.hole_radius, 1e-4);
+
+    var axis = normalize(rot(vec2<f32>(0.0, -1.0), -u.roll));
+    if (axis.y > 0.0) {
+        axis = -axis;
+    }
+    let tangent = vec2<f32>(-axis.y, axis.x);
+    let axial = dot(rel, axis);
+    let transverse = dot(rel, tangent);
+
+    let attack = smoothstep(0.0, 0.13, progress);
+    let decay = 1.0 - smoothstep(0.45, 1.0, progress);
+    let envelope = attack * decay;
+    let extension = smoothstep(0.0, 0.24, progress);
+    let main_length = min(radius * mix(11.0, 14.0, energy01), 0.52) * extension;
+    let base_width = radius * mix(0.38, 0.50, energy01);
+
+    let main_distance = max(axial, 0.0);
+    let main_fraction = clamp(main_distance / max(main_length, radius), 0.0, 1.0);
+    let main_cap = step(0.0, axial)
+        * (1.0 - smoothstep(main_length * 0.82, max(main_length, radius), main_distance));
+    let main_width = base_width * mix(1.55, 0.42, main_fraction);
+    let filament = 0.84 + 0.16 * sin(
+        main_distance / radius * 10.0 - u.time * 34.0 + transverse / radius * 2.4,
+    );
+    let main_core = exp2(-pow(transverse / max(main_width * 0.20, 1e-5), 2.0) * 2.2)
+        * main_cap
+        * filament;
+    let main_halo = exp2(-pow(transverse / max(main_width, 1e-5), 2.0) * 1.5)
+        * main_cap;
+
+    let counter_distance = max(-axial, 0.0);
+    let counter_length = main_length * 0.64;
+    let counter_fraction = clamp(
+        counter_distance / max(counter_length, radius),
+        0.0,
+        1.0,
+    );
+    let counter_cap = step(0.0, -axial)
+        * (1.0 - smoothstep(
+            counter_length * 0.78,
+            max(counter_length, radius),
+            counter_distance,
+        ));
+    let counter_width = base_width * mix(1.35, 0.50, counter_fraction);
+    let counter = exp2(-pow(transverse / max(counter_width, 1e-5), 2.0) * 1.7)
+        * counter_cap
+        * 0.18;
+
+    let radial = length(rel);
+    let shock_progress = smoothstep(0.02, 0.72, progress);
+    let shock_radius = radius * mix(1.15, mix(4.8, 5.7, energy01), shock_progress);
+    let shock_width = radius * mix(0.30, 0.09, shock_progress);
+    let shock = exp2(-pow((radial - shock_radius) / max(shock_width, 1e-5), 2.0) * 2.8)
+        * (1.0 - smoothstep(0.18, 0.78, progress));
+    let flash = exp2(-pow(radial / max(radius * 0.95, 1e-5), 2.0) * 2.4)
+        * (1.0 - smoothstep(0.0, 0.28, progress));
+
+    var light = vec3<f32>(0.0);
+    light = light
+        + vec3<f32>(0.48, 0.60, 1.0) * main_halo * envelope * energy
+        + vec3<f32>(0.96, 0.98, 1.0) * main_core * envelope * energy;
+    light = light
+        + vec3<f32>(0.58, 0.48, 1.0) * counter * envelope * energy
+        + vec3<f32>(0.68, 0.80, 1.0) * shock * energy
+        + vec3<f32>(0.92, 0.95, 1.0) * flash * energy;
+    let contribution = vec3<f32>(1.0) - exp(-min(light, vec3<f32>(4.0)));
+    return min(base + contribution, vec3<f32>(1.25));
 }
 
 fn cursor_overlay(base: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
@@ -508,7 +590,11 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             background(center + sp_b / vec2<f32>(aspect, 1.0)).b,
         );
         let d = normalize(vec3<f32>(-(pr / b) * (2.0 / b), -1.0));
-        return vec4<f32>(cursor_overlay(col + stars(d) * u.star * window, uv), 1.0);
+        let scene = col + stars(d) * u.star * window;
+        return vec4<f32>(
+            cursor_overlay(absorption_jet_overlay(scene, uv), uv),
+            1.0,
+        );
     }
 
     // ====================== near field: trace the geodesic ==================
@@ -634,5 +720,8 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
     // disk light is HDR; tonemap it on top of the (untouched) desktop sample
     let col = bg * trans + (vec3<f32>(1.0) - exp(-emitc * u.expo));
-    return vec4<f32>(cursor_overlay(col, uv), 1.0);
+    return vec4<f32>(
+        cursor_overlay(absorption_jet_overlay(col, uv), uv),
+        1.0,
+    );
 }

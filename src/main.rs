@@ -73,8 +73,8 @@ pub struct Uniforms {
     pub center: [f32; 2], // hole centre in uv, computed on the CPU
     pub spin: f32,        // Kerr spin 0..0.99; 0 = Schwarzschild fast path
     pub _pad: [f32; 2],
-    pub cursor: [f32; 4],        // pane-local x/y, strength, absorption
-    pub cursor_motion: [f32; 4], // pane-local velocity x/y, active, unused
+    pub cursor: [f32; 4],         // pane-local x/y, strength, absorption
+    pub cursor_motion: [f32; 4],  // pane-local velocity x/y, active, unused
     pub absorption_jet: [f32; 4], // progress, batch energy, active, reserved
     pub cursor_trail: [[f32; 4]; CURSOR_TRAIL_SAMPLES], // x/y, age, valid
 }
@@ -193,9 +193,7 @@ impl AbsorptionJet {
     }
 
     fn uniforms_at(self, now: std::time::Instant) -> [f32; 4] {
-        let elapsed = now
-            .saturating_duration_since(self.started_at)
-            .as_secs_f32();
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
         let progress = (elapsed / ABSORPTION_JET_DURATION_SEC).clamp(0.0, 1.0);
         let active = if elapsed < ABSORPTION_JET_DURATION_SEC {
             1.0
@@ -2645,6 +2643,14 @@ mod tests {
             cursor_trail: [[0.0; 4]; CURSOR_TRAIL_SAMPLES],
         };
         assert_eq!(uniforms.absorption_jet, payload);
+    }
+
+    #[test]
+    fn shader_composites_absorption_jet_in_both_output_paths() {
+        let shader = include_str!("black_hole_trash.wgsl");
+        assert!(shader.contains("absorption_jet: vec4<f32>"));
+        assert!(shader.contains("fn absorption_jet_overlay("));
+        assert_eq!(shader.matches("absorption_jet_overlay(").count(), 3);
     }
 
     #[test]
