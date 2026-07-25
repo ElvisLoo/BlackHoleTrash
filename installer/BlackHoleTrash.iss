@@ -1,5 +1,5 @@
 #define MyAppName "Black Hole Trash"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "rrrjqy66"
 #define MyAppURL "https://github.com/rrrjqy66/BlackHoleTrash"
 #define MyAppExeName "BlackHoleTrash.exe"
@@ -31,7 +31,7 @@ WizardStyle=modern
 CloseApplications=force
 RestartApplications=no
 AppMutex=Local\BlackHoleTrashOverlay
-VersionInfoVersion=1.3.0.0
+VersionInfoVersion=1.4.0.0
 VersionInfoDescription={#MyAppName} Installer
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}

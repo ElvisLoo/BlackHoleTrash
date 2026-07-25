@@ -8,9 +8,9 @@
 
 Black Hole Trash is a compact, draggable Windows desktop black hole and a real Recycle Bin target. It bends the live desktop with real-time gravitational lensing and safely sends dropped files, folders, or multiple items to the Windows Recycle Bin instead of permanently deleting them.
 
-## Download v1.3.0
+## Download v1.4.0
 
-[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.3.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.3.0)
+[Download BlackHoleTrash-Setup-x64.exe](https://github.com/rrrjqy66/BlackHoleTrash/releases/download/v1.4.0/BlackHoleTrash-Setup-x64.exe) · [View the Release](https://github.com/rrrjqy66/BlackHoleTrash/releases/tag/v1.4.0)
 
 The per-user installer requires no administrator privileges. It is currently unsigned, so Windows SmartScreen may display a warning. Use the `.sha256` asset on the same Release page to verify the download.
 
@@ -18,10 +18,11 @@ The per-user installer requires no administrator privileges. It is currently uns
 
 - **Real Recycle Bin drops**: Windows OLE `IDropTarget` accepts Explorer files, folders, and multi-item drops, then recycles them through `IFileOperation + FOFX_RECYCLEONDELETE`.
 - **No permanent-delete fallback**: there is no `DeleteFile`, `RemoveDirectory`, or `std::fs::remove_*` fallback. Source items remain untouched if the Shell rejects or cancels an operation.
-- **Real-time gravitational lensing**: Schwarzschild / Kerr geodesics, the event horizon, photon ring, relativistic accretion disk, and blackbody emission are rendered live.
+- **Real-time gravitational lensing**: Schwarzschild / Kerr geodesics, the event horizon, photon ring, relativistic accretion disk, and blackbody emission are rendered live. When spin is enabled, the lensed background and disk rotate continuously.
 - **Eight visual presets**: Inferno, Gargantua, Quasar, M87* donut, Blazar, Face-on ember, Pure lens, and Zen switch live from the tray with a smooth crossfade.
 - **Cursor gravity and absorption trails**: the pointer meets progressive resistance, curves around the event horizon, and spirals inward with layered directional afterimages. A fast outward flick always escapes.
 - **Six absorption growth tiers**: successful item counts at `0 / 1 / 3 / 5 / 10 / 20` select six sizes. The maximum is `4x` the starting size, with a smooth transition between tiers.
+- **Absorption energy feedback**: after files reach the Recycle Bin, the hole emits bipolar energy jets, a central flash, and an expanding shockwave. Larger batches produce a stronger response.
 - **Desktop-aware visibility and always-on-top**: by default the hole remains visible only where no ordinary window covers it. The tray can enable always-on-top. Neither mode creates a taskbar button; the tray icon is the only app entry.
 - **Chinese system tray**: always-on-top, visual preset, size, speed, FPS, screensaver, spin, position, monitor, config, and quit controls are available from the tray.
 - **Fixed FPS choices**: the tray exposes only `30 FPS` and `60 FPS`. Missing, `0`, invalid, or unsupported config values fall back to `30`.
@@ -30,6 +31,12 @@ The per-user installer requires no administrator privileges. It is currently uns
 - **Screensaver mode**: the hole appears after a configured idle period and disappears on the first keyboard or mouse input.
 - **Capture exclusion and screenshot repair**: the overlay is excluded from its own desktop capture to prevent recursive mirror feedback; full-screen Print Screen images can composite the hole back into the clipboard image.
 - **Update notices**: the app checks GitHub Releases at most once per day and adds a tray entry when a newer version is available. The check can be disabled in config.
+
+## What's New in v1.4.0
+
+- **Absorption shockwave**: a successful Recycle Bin operation triggers about `900 ms` of bipolar jets, a central flash, and an expanding ring. Batch energy scales smoothly with item count and caps at `20` items.
+- **Visible continuous spin**: the Medium, High, and Extreme tray options now continuously rotate the lensed background and accretion-disk texture. Speed increases by tier, direction follows the active disk preset, and Off remains static on the existing low-cost path.
+- **Elevated startup blocked**: launching as administrator now displays a direct warning that Windows UIPI would break Explorer drag-and-drop, then exits. A normal double-click or Start menu launch works without elevation.
 
 ## What's New in v1.3.0
 
@@ -140,6 +147,7 @@ MIT. See [LICENSE](LICENSE).
 
 | Version | Features Added |
 | --- | --- |
+| **v1.4.0** | Absorption jets and shockwave, visible continuous spin, and elevated-startup protection. |
 | **v1.3.0** | Desktop-aware visibility by default, optional always-on-top, tray-only presence, double-`Ctrl` placement, and a 30 FPS default. |
 | **v1.2.0** | Six absorption growth tiers up to 4x, Chinese tray controls, 30/60-only FPS choices, and the invalid-FPS fallback policy. |
 | **v1.1.0** | Cursor gravity, progressive resistance, spiral absorption, directional afterimages, outward-flick escape, and cross-monitor motion. |
