@@ -75,6 +75,7 @@ pub struct Uniforms {
     pub _pad: [f32; 2],
     pub cursor: [f32; 4],        // pane-local x/y, strength, absorption
     pub cursor_motion: [f32; 4], // pane-local velocity x/y, active, unused
+    pub absorption_jet: [f32; 4], // progress, batch energy, active, reserved
     pub cursor_trail: [[f32; 4]; CURSOR_TRAIL_SAMPLES], // x/y, age, valid
 }
 
@@ -185,6 +186,10 @@ impl AbsorptionJet {
         let capped = count.min(20) as f32;
         let energy = 1.0 + 0.5 * capped.ln() / 20.0_f32.ln();
         Some(Self { started_at, energy })
+    }
+
+    fn new(count: usize) -> Option<Self> {
+        Self::at(count, std::time::Instant::now())
     }
 
     fn uniforms_at(self, now: std::time::Instant) -> [f32; 4] {
@@ -470,6 +475,7 @@ struct State {
     size_transition_start: std::time::Instant,
     size_level: usize,
     swallowed_items: usize,
+    absorption_jet: Option<AbsorptionJet>,
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
@@ -668,6 +674,7 @@ impl State {
             size_transition_start: std::time::Instant::now(),
             size_level: 0,
             swallowed_items: 0,
+            absorption_jet: None,
             drift_speed: DEFAULT_DRIFT_SPEED,
             drift_x: DEFAULT_DRIFT_X,
             drift_y: DEFAULT_DRIFT_Y,
@@ -982,6 +989,16 @@ impl State {
         }
     }
 
+    fn trigger_absorption_jet(&mut self, count: usize) {
+        self.absorption_jet = AbsorptionJet::new(count);
+    }
+
+    fn current_absorption_jet_uniforms(&self) -> [f32; 4] {
+        self.absorption_jet
+            .map(|jet| jet.uniforms_at(std::time::Instant::now()))
+            .unwrap_or([0.0; 4])
+    }
+
     fn resize_pane(&mut self, i: usize, new_size: PhysicalSize<u32>) {
         // Skip no-op reconfigures: the window is layered after startup and a
         // DX12 swapchain rebuild on a layered window fails.
@@ -1140,6 +1157,7 @@ impl State {
             _pad: [0.0; 2],
             cursor,
             cursor_motion,
+            absorption_jet: self.current_absorption_jet_uniforms(),
             cursor_trail,
         }
     }
@@ -2013,6 +2031,7 @@ fn main() {
                                     "moved {} item(s) to the Recycle Bin",
                                     result.paths.len()
                                 );
+                                state.trigger_absorption_jet(result.paths.len());
                                 if let Some(level) =
                                     state.absorb_successful_items(result.paths.len())
                                 {
@@ -2601,6 +2620,31 @@ mod tests {
             jet.uniforms_at(started_at + std::time::Duration::from_secs(2)),
             [1.0, 1.0, 0.0, 0.0],
         );
+    }
+
+    #[test]
+    fn absorption_jet_uniform_payload_is_one_aligned_vec4() {
+        let started_at = std::time::Instant::now();
+        let jet = AbsorptionJet::at(3, started_at).expect("jet");
+        let payload = jet.uniforms_at(started_at);
+        assert_eq!(payload.len(), 4);
+        assert_eq!(payload[2], 1.0);
+        assert_eq!(std::mem::size_of_val(&payload), 16);
+        let uniforms = Uniforms {
+            resolution: [1.0, 1.0],
+            time: 0.0,
+            has_desktop: 0.0,
+            look: [0.0; 14],
+            hole_radius: 0.01,
+            center: [0.5, 0.5],
+            spin: 0.0,
+            _pad: [0.0; 2],
+            cursor: [0.0; 4],
+            cursor_motion: [0.0; 4],
+            absorption_jet: payload,
+            cursor_trail: [[0.0; 4]; CURSOR_TRAIL_SAMPLES],
+        };
+        assert_eq!(uniforms.absorption_jet, payload);
     }
 
     #[test]
