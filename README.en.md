@@ -55,6 +55,10 @@ The per-user installer requires no administrator privileges. It is currently uns
 
 The pointer absorption lasts about 160 ms and starts near the warm ring. It never traps the pointer: a fast outward flick escapes immediately. The native pointer stays hidden for at most 150 ms after absorption and returns on the next physical movement. Gravity pauses while repositioning the hole itself but remains active during Explorer file drags.
 
+### Do Not Run as Administrator
+
+Black Hole Trash does not require administrator privileges. Windows UIPI prevents a normally running File Explorer from dragging files into an elevated app, so Black Hole Trash displays a warning and exits when it detects administrator privileges. Launch it by double-clicking `BlackHoleTrash.exe` or from the Start menu; do not select **Run as administrator**.
+
 ## Desktop Modes and Controls
 
 - **Default desktop mode**: no `Win+D` key press is required. Every `100 ms`, the app checks whether an ordinary window actually covers the hole. A partially sized window beside the hole leaves it visible; moving that window over the hole hides it, and moving it away restores it.
