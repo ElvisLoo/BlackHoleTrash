@@ -82,6 +82,7 @@ const MIN_TRASH_SIZE: f32 = 0.011;
 const DEFAULT_SIZE: f32 = MIN_TRASH_SIZE;
 const DEFAULT_FPS: u32 = 30;
 const GROWTH_DURATION_SEC: f32 = 0.4;
+const ABSORPTION_JET_DURATION_SEC: f32 = 0.9;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
@@ -168,6 +169,36 @@ fn animated_radius(from: f32, to: f32, elapsed: f32) -> f32 {
 fn swallowed_progress_after_success(current: usize, added: usize) -> (usize, usize) {
     let total = current.saturating_add(added).min(20);
     (total, size_level_for_total(total))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AbsorptionJet {
+    started_at: std::time::Instant,
+    energy: f32,
+}
+
+impl AbsorptionJet {
+    fn at(count: usize, started_at: std::time::Instant) -> Option<Self> {
+        if count == 0 {
+            return None;
+        }
+        let capped = count.min(20) as f32;
+        let energy = 1.0 + 0.5 * capped.ln() / 20.0_f32.ln();
+        Some(Self { started_at, energy })
+    }
+
+    fn uniforms_at(self, now: std::time::Instant) -> [f32; 4] {
+        let elapsed = now
+            .saturating_duration_since(self.started_at)
+            .as_secs_f32();
+        let progress = (elapsed / ABSORPTION_JET_DURATION_SEC).clamp(0.0, 1.0);
+        let active = if elapsed < ABSORPTION_JET_DURATION_SEC {
+            1.0
+        } else {
+            0.0
+        };
+        [progress, self.energy, active, 0.0]
+    }
 }
 
 fn normalize_fps(value: Option<u32>) -> u32 {
@@ -2524,6 +2555,52 @@ mod tests {
     #[test]
     fn swallowed_progress_manual_tiers_have_matching_start_counts() {
         assert_eq!(SIZE_TIERS.map(|tier| tier.threshold), [0, 1, 3, 5, 10, 20]);
+    }
+
+    #[test]
+    fn absorption_jet_energy_scales_logarithmically_and_caps_at_twenty() {
+        assert_eq!(AbsorptionJet::at(0, std::time::Instant::now()), None);
+        assert_close(
+            AbsorptionJet::at(1, std::time::Instant::now())
+                .expect("one item should trigger a jet")
+                .energy,
+            1.0,
+        );
+        let two = AbsorptionJet::at(2, std::time::Instant::now())
+            .expect("two items should trigger a jet")
+            .energy;
+        assert!(two > 1.0 && two < 1.5);
+        assert_close(
+            AbsorptionJet::at(20, std::time::Instant::now())
+                .expect("twenty items should trigger a jet")
+                .energy,
+            1.5,
+        );
+        assert_close(
+            AbsorptionJet::at(usize::MAX, std::time::Instant::now())
+                .expect("large batches should still trigger a jet")
+                .energy,
+            1.5,
+        );
+    }
+
+    #[test]
+    fn absorption_jet_uniforms_cover_start_midpoint_and_completion() {
+        let started_at = std::time::Instant::now();
+        let jet = AbsorptionJet::at(1, started_at).expect("jet");
+        assert_eq!(jet.uniforms_at(started_at), [0.0, 1.0, 1.0, 0.0]);
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_millis(450)),
+            [0.5, 1.0, 1.0, 0.0],
+        );
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_millis(900)),
+            [1.0, 1.0, 0.0, 0.0],
+        );
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_secs(2)),
+            [1.0, 1.0, 0.0, 0.0],
+        );
     }
 
     #[test]
