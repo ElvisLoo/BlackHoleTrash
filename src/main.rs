@@ -1713,6 +1713,11 @@ fn check_tray_option(items: &[tray_icon::menu::CheckMenuItem], selected: usize) 
 fn main() {
     env_logger::init();
 
+    #[cfg(windows)]
+    if !platform::windows::allow_startup() {
+        return;
+    }
+
     // Single instance with takeover: a second copy would double every
     // overlay, so instead of just refusing to start, a relaunch asks the
     // running instance to quit (named event) and takes its place. That
