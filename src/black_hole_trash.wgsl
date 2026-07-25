@@ -44,8 +44,8 @@ struct Uniforms {
     center_x: f32,      // hole centre in uv, computed on the CPU
     center_y: f32,      // (drift, pinned or follow-the-cursor placement)
     spin: f32,          // Kerr spin 0..0.99; 0 = Schwarzschild fast path
-    _pad1: f32,
-    _pad2: f32,
+    spin_phase: f32,    // accumulated visible rotation, radians
+    _pad: f32,
     cursor: vec4<f32>,
     cursor_motion: vec4<f32>,
     absorption_jet: vec4<f32>, // progress, batch energy, active, reserved
@@ -443,7 +443,7 @@ fn shade_crossing(
     let kep   = pow(rin / rc, 1.5);
     // sqrt(1 - 1.5/r): time runs slower for the inner orbits
     let gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
-    let swirl = rc * u.wind * 0.12 - t * kep * spd * gloc * sdir;
+    let swirl = rc * u.wind * 0.12 - t * kep * spd * gloc * sdir - u.spin_phase * kep;
     var streaks = vnoiseWrapY(vec2<f32>(rc * 2.8, turns * 19.0 + swirl * 3.0), 19.0) * 0.65
                 + vnoiseWrapY(vec2<f32>(rc * 1.0, turns * 9.0  + swirl * 1.5 + 7.0), 9.0) * 0.35;
     streaks = 0.35 + u.contr * streaks * streaks;
@@ -481,8 +481,10 @@ const KERR_STEPS: i32 = 88;
 // is physically real but imperceptible at desktop scale, so the VISIBLE
 // layer exaggerates it: background samples rotate around the hole, strongest
 // near the ring, prograde with the disk. Zero spin is an exact no-op.
-fn drag_twist(b_rs: f32, spin_signed: f32) -> f32 {
-    return 1.3 * spin_signed / (1.0 + 0.8 * pow(b_rs / B_CRIT, 2.0));
+fn drag_twist(b_rs: f32, spin_signed: f32, spin_phase: f32) -> f32 {
+    let active_phase = select(0.0, spin_phase, abs(spin_signed) >= 0.005);
+    return (1.3 * spin_signed + active_phase)
+        / (1.0 + 0.8 * pow(b_rs / B_CRIT, 2.0));
 }
 
 fn kerr_isco_rs(spin: f32) -> f32 {
@@ -580,7 +582,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         // mild chromatic aberration: blue bends a touch more than red
         let ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
         let sdir_far = select(1.0, -1.0, u.speed < 0.0);
-        let tw = drag_twist(b, u.spin * sdir_far);
+        let tw = drag_twist(b, u.spin * sdir_far, u.spin_phase);
         let sp_r = rot(p - dir * defl * (1.0 - ab), tw);
         let sp_g = rot(p - dir * defl, tw);
         let sp_b = rot(p - dir * defl * (1.0 + ab), tw);
@@ -709,7 +711,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             let hp  = x + d * tpl;
             let q   = rot(hp.xy, -u.roll) / W;
             var sp  = vec2<f32>(q.x, -q.y);
-            sp = rot(sp, drag_twist(b, u.spin * sdir));
+            sp = rot(sp, drag_twist(b, u.spin * sdir, u.spin_phase));
             // fade the *displacement*, never the color - no seam anywhere
             let suv = center + (p + (sp - p) * window) / vec2<f32>(aspect, 1.0);
             // rays bent past ~90° never reach the sky plane; fade them out

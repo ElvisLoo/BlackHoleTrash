@@ -72,7 +72,8 @@ pub struct Uniforms {
     pub hole_radius: f32,
     pub center: [f32; 2], // hole centre in uv, computed on the CPU
     pub spin: f32,        // Kerr spin 0..0.99; 0 = Schwarzschild fast path
-    pub _pad: [f32; 2],
+    pub spin_phase: f32,  // continuous visible rotation, radians
+    pub _pad: f32,
     pub cursor: [f32; 4],         // pane-local x/y, strength, absorption
     pub cursor_motion: [f32; 4],  // pane-local velocity x/y, active, unused
     pub absorption_jet: [f32; 4], // progress, batch energy, active, reserved
@@ -213,6 +214,14 @@ fn normalize_fps(value: Option<u32>) -> u32 {
 
 fn normalize_always_on_top(value: Option<u32>) -> bool {
     value == Some(1)
+}
+
+fn spin_angular_velocity(spin: f32) -> f32 {
+    0.9 * spin.clamp(0.0, 0.98).powi(3)
+}
+
+fn advance_spin_phase(phase: f32, spin: f32, direction: f32, elapsed: f32) -> f32 {
+    phase + spin_angular_velocity(spin) * direction.signum() * elapsed.clamp(0.0, 0.25)
 }
 
 fn should_show_overlay(
@@ -477,8 +486,10 @@ struct State {
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
-    fps: u32,                                 // always 30 or 60
-    spin: f32,                                // Kerr spin 0..0.99
+    fps: u32,  // always 30 or 60
+    spin: f32, // Kerr spin 0..0.99
+    spin_phase: f32,
+    last_spin_tick: std::time::Instant,
     idle_minutes: f32, // 0 = always visible; >0 = appear after this much idle
     appear_start: Option<std::time::Instant>, // grow-in animation anchor
     // hole placement in virtual-desktop pixels: the roam box is the bounding
@@ -678,6 +689,8 @@ impl State {
             drift_y: DEFAULT_DRIFT_Y,
             fps: DEFAULT_FPS,
             spin: 0.0,
+            spin_phase: 0.0,
+            last_spin_tick: std::time::Instant::now(),
             idle_minutes: 0.0,
             appear_start: None,
             roam_pos: [0.0, 0.0],
@@ -934,6 +947,16 @@ impl State {
         self.center_px[1] += (target[1] - self.center_px[1]) * k;
     }
 
+    fn tick_spin_phase(&mut self) {
+        let now = std::time::Instant::now();
+        let elapsed = now
+            .saturating_duration_since(self.last_spin_tick)
+            .as_secs_f32();
+        self.last_spin_tick = now;
+        let direction = self.current_look()[11];
+        self.spin_phase = advance_spin_phase(self.spin_phase, self.spin, direction, elapsed);
+    }
+
     /// Screensaver grow-in: 0 -> 1 over ~2 s after the overlay appears from
     /// idle, so the hole swells out of nothing instead of popping in.
     fn appear_factor(&self) -> f32 {
@@ -1152,7 +1175,8 @@ impl State {
                     as f32,
             ],
             spin: self.spin,
-            _pad: [0.0; 2],
+            spin_phase: self.spin_phase,
+            _pad: 0.0,
             cursor,
             cursor_motion,
             absorption_jet: self.current_absorption_jet_uniforms(),
@@ -2005,6 +2029,7 @@ fn main() {
                 }
             }
             state.tick_center();
+            state.tick_spin_phase();
 
             #[cfg(windows)]
             {
@@ -2641,7 +2666,8 @@ mod tests {
             hole_radius: 0.01,
             center: [0.5, 0.5],
             spin: 0.0,
-            _pad: [0.0; 2],
+            spin_phase: 0.0,
+            _pad: 0.0,
             cursor: [0.0; 4],
             cursor_motion: [0.0; 4],
             absorption_jet: payload,
@@ -2656,6 +2682,16 @@ mod tests {
         assert!(shader.contains("absorption_jet: vec4<f32>"));
         assert!(shader.contains("fn absorption_jet_overlay("));
         assert_eq!(shader.matches("absorption_jet_overlay(").count(), 3);
+    }
+
+    #[test]
+    fn shader_uses_continuous_spin_phase_for_lens_and_disk_motion() {
+        let shader = include_str!("black_hole_trash.wgsl");
+        assert!(shader.contains("spin_phase: f32"));
+        assert!(shader.contains("fn drag_twist(b_rs: f32, spin_signed: f32, spin_phase: f32)"));
+        assert_eq!(shader.matches("drag_twist(").count(), 3);
+        assert_eq!(shader.matches("u.spin_phase").count(), 3);
+        assert!(shader.contains("- u.spin_phase"));
     }
 
     #[test]
@@ -2698,6 +2734,24 @@ mod tests {
         assert_eq!(parse_config("fps = nope").fps, Some(None));
         assert_eq!(parse_config("fps = 30").fps, Some(Some(30)));
         assert_eq!(parse_config("fps = 60").fps, Some(Some(60)));
+    }
+
+    #[test]
+    fn spin_phase_stops_accelerates_reverses_and_caps_long_frame_gaps() {
+        assert_close(spin_angular_velocity(0.0), 0.0);
+        let medium = spin_angular_velocity(0.6);
+        let high = spin_angular_velocity(0.9);
+        let extreme = spin_angular_velocity(0.98);
+        assert!(medium > 0.0);
+        assert!(medium < high);
+        assert!(high < extreme);
+
+        assert_close(advance_spin_phase(1.25, 0.0, 1.0, 0.1), 1.25);
+        assert_close(advance_spin_phase(0.0, 0.9, -1.0, 0.1), -high * 0.1);
+        assert_close(
+            advance_spin_phase(0.0, 0.9, 1.0, 5.0),
+            advance_spin_phase(0.0, 0.9, 1.0, 0.25),
+        );
     }
 
     #[test]
