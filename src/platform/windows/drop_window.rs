@@ -10,11 +10,12 @@ use windows::Win32::System::Ole::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetCursorPos, GetWindowRect, RegisterClassW,
-    SetLayeredWindowAttributes, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST,
-    LWA_ALPHA, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WM_CANCELMODE,
-    WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    ChangeWindowMessageFilterEx, CreateWindowExW, DefWindowProcW, DestroyWindow, GetCursorPos,
+    GetWindowRect, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow,
+    CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, LWA_ALPHA, MSGFLT_ALLOW, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE, WM_CANCELMODE, WM_CAPTURECHANGED, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const WINDOW_SIZE: i32 = 88;
@@ -57,6 +58,18 @@ impl DropWindow {
         let target: IDropTarget = ComObject::new(OleDropTarget::new(hwnd, sender)).into_interface();
         unsafe {
             RegisterDragDrop(hwnd, &target)?;
+        }
+        // Allow drag-drop messages through UIPI when running elevated.
+        // Windows UIPI blocks messages from lower-integrity processes (Explorer)
+        // to higher-integrity processes (admin). These calls lift that restriction
+        // for the OLE drag-drop messages our window needs to receive.
+        const WM_DROPFILES: u32 = 0x0233;
+        const WM_COPYDATA: u32 = 0x004A;
+        const WM_COPYGLOBALDATA: u32 = 0x0049;
+        unsafe {
+            let _ = ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, None);
+            let _ = ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, None);
+            let _ = ChangeWindowMessageFilterEx(hwnd, WM_COPYGLOBALDATA, MSGFLT_ALLOW, None);
         }
         Ok(Self {
             hwnd,
