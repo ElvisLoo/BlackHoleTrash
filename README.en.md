@@ -10,7 +10,7 @@ Black Hole Trash is a compact, draggable Windows desktop black hole and a real R
 
 ## Download v1.4.0
 
-[Download BlackHoleTrash.exe](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.4.0/BlackHoleTrash.exe) · [View the Release](https://github.com/ElvisLoo/BlackHoleTrash/releases/tag/v1.4.0)
+[Download BlackHoleTrash.exe](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.4.0-elvis/BlackHoleTrash.exe) · [View the Release](https://github.com/ElvisLoo/BlackHoleTrash/releases/tag/v1.4.0-elvis)
 
 For the macOS version, see [ZGhey/blackhole-mac](https://github.com/ZGhey/blackhole-mac).
 

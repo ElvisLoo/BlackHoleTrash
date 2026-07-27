@@ -10,7 +10,7 @@ Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，也是一
 
 ## 下载 v1.4.0
 
-[下载 BlackHoleTrash.exe](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.4.0/BlackHoleTrash.exe) · [查看 Release](https://github.com/ElvisLoo/BlackHoleTrash/releases/tag/v1.4.0)
+[下载 BlackHoleTrash.exe](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.4.0-elvis/BlackHoleTrash.exe) · [查看 Release](https://github.com/ElvisLoo/BlackHoleTrash/releases/tag/v1.4.0-elvis)
 
 macOS 版本可参考并下载：[ZGhey/blackhole-mac](https://github.com/ZGhey/blackhole-mac)。
 
