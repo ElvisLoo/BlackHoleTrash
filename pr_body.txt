@@ -1,0 +1,26 @@
+﻿## Changes
+
+### Chinese localization
+- Full Chinese translation of tray menu
+- All preset names, sizes, speeds, FPS, screensaver, spin options
+
+### Config persistence
+- Auto-save current settings to black-hole-trash.toml on exit
+- Auto-restore on next launch
+
+### Auto-start on boot
+- New tray menu checkbox for auto-start with Windows
+- Uses HKCU registry, no admin required
+
+### New M87* Photo preset
+- Simulates the 2019 EHT real black hole photo
+- High inclination, strong Doppler asymmetry, smooth thin ring
+
+### Other improvements
+- Size options (Small/Medium/Large) increased by 1.5x
+- Presets grouped under Type submenu
+
+### Files changed
+- Cargo.toml: version 1.1.0 -> 1.2.0
+- src/main.rs: i18n, config save, auto-start, new preset
+- installer/BlackHoleTrash.iss: version update

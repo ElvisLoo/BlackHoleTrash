@@ -1,5 +1,5 @@
 #define MyAppName "Black Hole Trash"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "ElvisLoo"
 #define MyAppURL "https://github.com/ElvisLoo/BlackHoleTrash"
 #define MyAppExeName "BlackHoleTrash.exe"
@@ -31,7 +31,7 @@ WizardStyle=modern
 CloseApplications=force
 RestartApplications=no
 AppMutex=Local\BlackHoleTrashOverlay
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion=1.4.0.0
 VersionInfoDescription={#MyAppName} Installer
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
@@ -47,6 +47,9 @@ Source: "..\target\release\BlackHoleTrash.exe"; DestDir: "{app}"; Flags: ignorev
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.en.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\community\qq-group.jpg"; DestDir: "{app}\assets\community"; Flags: ignoreversion
+Source: "..\assets\community\donate.jpg"; DestDir: "{app}\assets\community"; Flags: ignoreversion
+Source: "..\assets\community\star-history.svg"; DestDir: "{app}\assets\community"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Black Hole Trash"; Filename: "{app}\{#MyAppExeName}"

@@ -44,10 +44,11 @@ struct Uniforms {
     center_x: f32,      // hole centre in uv, computed on the CPU
     center_y: f32,      // (drift, pinned or follow-the-cursor placement)
     spin: f32,          // Kerr spin 0..0.99; 0 = Schwarzschild fast path
-    _pad1: f32,
-    _pad2: f32,
+    spin_phase: f32,    // accumulated visible rotation, radians
+    _pad: f32,
     cursor: vec4<f32>,
     cursor_motion: vec4<f32>,
+    absorption_jet: vec4<f32>, // progress, batch energy, active, reserved
     cursor_trail: array<vec4<f32>, 16>,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -75,7 +76,7 @@ fn vs_main(@builtin(vertex_index) vid: u32) -> VSOut {
 
 // ---------------------------------------------------------------- tunables --
 // Disk look, size and centre come from the uniforms (tray menu / config
-// file / placement hotkey); only the hole-independent knobs stay compile-time.
+// file / placement gesture); only the hole-independent knobs stay compile-time.
 const LENS_DEPTH: f32    = 13.0;   // hole-to-sky-plane distance in r_s - bigger = bends harder
 const N_STEPS: i32       = 48;     // geodesic steps per pixel (perf dial)
 const B_CRIT: f32        = 2.5980762; // critical impact parameter, r_s
@@ -153,6 +154,87 @@ fn cursor_arrow_sdf(
     );
     let stem = sd_box(local - vec2<f32>(-5.0, 0.0), vec2<f32>(4.2, 1.75));
     return min(head, stem) * scale;
+}
+
+fn absorption_jet_overlay(base: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    if (u.absorption_jet.z < 0.5) {
+        return base;
+    }
+
+    let progress = clamp(u.absorption_jet.x, 0.0, 1.0);
+    let energy = clamp(u.absorption_jet.y, 1.0, 1.5);
+    let energy01 = (energy - 1.0) / 0.5;
+    let aspect = u.resolution.x / max(u.resolution.y, 1.0);
+    let center = vec2<f32>(u.center_x, u.center_y);
+    let rel = (uv - center) * vec2<f32>(aspect, 1.0);
+    let radius = max(u.hole_radius, 1e-4);
+
+    var axis = normalize(rot(vec2<f32>(0.0, -1.0), -u.roll));
+    if (axis.y > 0.0) {
+        axis = -axis;
+    }
+    let tangent = vec2<f32>(-axis.y, axis.x);
+    let axial = dot(rel, axis);
+    let transverse = dot(rel, tangent);
+
+    let attack = smoothstep(0.0, 0.13, progress);
+    let decay = 1.0 - smoothstep(0.45, 1.0, progress);
+    let envelope = attack * decay;
+    let extension = smoothstep(0.0, 0.24, progress);
+    let main_length = min(radius * mix(11.0, 14.0, energy01), 0.52) * extension;
+    let base_width = radius * mix(0.38, 0.50, energy01);
+
+    let main_distance = max(axial, 0.0);
+    let main_fraction = clamp(main_distance / max(main_length, radius), 0.0, 1.0);
+    let main_cap = step(0.0, axial)
+        * (1.0 - smoothstep(main_length * 0.82, max(main_length, radius), main_distance));
+    let main_width = base_width * mix(1.55, 0.42, main_fraction);
+    let filament = 0.84 + 0.16 * sin(
+        main_distance / radius * 10.0 - u.time * 34.0 + transverse / radius * 2.4,
+    );
+    let main_core = exp2(-pow(transverse / max(main_width * 0.20, 1e-5), 2.0) * 2.2)
+        * main_cap
+        * filament;
+    let main_halo = exp2(-pow(transverse / max(main_width, 1e-5), 2.0) * 1.5)
+        * main_cap;
+
+    let counter_distance = max(-axial, 0.0);
+    let counter_length = main_length * 0.64;
+    let counter_fraction = clamp(
+        counter_distance / max(counter_length, radius),
+        0.0,
+        1.0,
+    );
+    let counter_cap = step(0.0, -axial)
+        * (1.0 - smoothstep(
+            counter_length * 0.78,
+            max(counter_length, radius),
+            counter_distance,
+        ));
+    let counter_width = base_width * mix(1.35, 0.50, counter_fraction);
+    let counter = exp2(-pow(transverse / max(counter_width, 1e-5), 2.0) * 1.7)
+        * counter_cap
+        * 0.18;
+
+    let radial = length(rel);
+    let shock_progress = smoothstep(0.02, 0.72, progress);
+    let shock_radius = radius * mix(1.15, mix(4.8, 5.7, energy01), shock_progress);
+    let shock_width = radius * mix(0.30, 0.09, shock_progress);
+    let shock = exp2(-pow((radial - shock_radius) / max(shock_width, 1e-5), 2.0) * 2.8)
+        * (1.0 - smoothstep(0.18, 0.78, progress));
+    let flash = exp2(-pow(radial / max(radius * 0.95, 1e-5), 2.0) * 2.4)
+        * (1.0 - smoothstep(0.0, 0.28, progress));
+
+    var light = vec3<f32>(0.0);
+    light = light
+        + vec3<f32>(0.48, 0.60, 1.0) * main_halo * envelope * energy
+        + vec3<f32>(0.96, 0.98, 1.0) * main_core * envelope * energy;
+    light = light
+        + vec3<f32>(0.58, 0.48, 1.0) * counter * envelope * energy
+        + vec3<f32>(0.68, 0.80, 1.0) * shock * energy
+        + vec3<f32>(0.92, 0.95, 1.0) * flash * energy;
+    let contribution = vec3<f32>(1.0) - exp(-min(light, vec3<f32>(4.0)));
+    return min(base + contribution, vec3<f32>(1.25));
 }
 
 fn cursor_overlay(base: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
@@ -361,7 +443,7 @@ fn shade_crossing(
     let kep   = pow(rin / rc, 1.5);
     // sqrt(1 - 1.5/r): time runs slower for the inner orbits
     let gloc  = sqrt(max(1.0 - 1.5 / rc, 0.02));
-    let swirl = rc * u.wind * 0.12 - t * kep * spd * gloc * sdir;
+    let swirl = rc * u.wind * 0.12 - t * kep * spd * gloc * sdir - u.spin_phase * kep;
     var streaks = vnoiseWrapY(vec2<f32>(rc * 2.8, turns * 19.0 + swirl * 3.0), 19.0) * 0.65
                 + vnoiseWrapY(vec2<f32>(rc * 1.0, turns * 9.0  + swirl * 1.5 + 7.0), 9.0) * 0.35;
     streaks = 0.35 + u.contr * streaks * streaks;
@@ -399,8 +481,10 @@ const KERR_STEPS: i32 = 88;
 // is physically real but imperceptible at desktop scale, so the VISIBLE
 // layer exaggerates it: background samples rotate around the hole, strongest
 // near the ring, prograde with the disk. Zero spin is an exact no-op.
-fn drag_twist(b_rs: f32, spin_signed: f32) -> f32 {
-    return 1.3 * spin_signed / (1.0 + 0.8 * pow(b_rs / B_CRIT, 2.0));
+fn drag_twist(b_rs: f32, spin_signed: f32, spin_phase: f32) -> f32 {
+    let active_phase = select(0.0, spin_phase, abs(spin_signed) >= 0.005);
+    return (1.3 * spin_signed + active_phase)
+        / (1.0 + 0.8 * pow(b_rs / B_CRIT, 2.0));
 }
 
 fn kerr_isco_rs(spin: f32) -> f32 {
@@ -498,7 +582,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         // mild chromatic aberration: blue bends a touch more than red
         let ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
         let sdir_far = select(1.0, -1.0, u.speed < 0.0);
-        let tw = drag_twist(b, u.spin * sdir_far);
+        let tw = drag_twist(b, u.spin * sdir_far, u.spin_phase);
         let sp_r = rot(p - dir * defl * (1.0 - ab), tw);
         let sp_g = rot(p - dir * defl, tw);
         let sp_b = rot(p - dir * defl * (1.0 + ab), tw);
@@ -508,7 +592,11 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             background(center + sp_b / vec2<f32>(aspect, 1.0)).b,
         );
         let d = normalize(vec3<f32>(-(pr / b) * (2.0 / b), -1.0));
-        return vec4<f32>(cursor_overlay(col + stars(d) * u.star * window, uv), 1.0);
+        let scene = col + stars(d) * u.star * window;
+        return vec4<f32>(
+            cursor_overlay(absorption_jet_overlay(scene, uv), uv),
+            1.0,
+        );
     }
 
     // ====================== near field: trace the geodesic ==================
@@ -623,7 +711,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             let hp  = x + d * tpl;
             let q   = rot(hp.xy, -u.roll) / W;
             var sp  = vec2<f32>(q.x, -q.y);
-            sp = rot(sp, drag_twist(b, u.spin * sdir));
+            sp = rot(sp, drag_twist(b, u.spin * sdir, u.spin_phase));
             // fade the *displacement*, never the color - no seam anywhere
             let suv = center + (p + (sp - p) * window) / vec2<f32>(aspect, 1.0);
             // rays bent past ~90° never reach the sky plane; fade them out
@@ -634,5 +722,8 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
     // disk light is HDR; tonemap it on top of the (untouched) desktop sample
     let col = bg * trans + (vec3<f32>(1.0) - exp(-emitc * u.expo));
-    return vec4<f32>(cursor_overlay(col, uv), 1.0);
+    return vec4<f32>(
+        cursor_overlay(absorption_jet_overlay(col, uv), uv),
+        1.0,
+    );
 }

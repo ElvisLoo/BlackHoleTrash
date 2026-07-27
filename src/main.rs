@@ -72,19 +72,172 @@ pub struct Uniforms {
     pub hole_radius: f32,
     pub center: [f32; 2], // hole centre in uv, computed on the CPU
     pub spin: f32,        // Kerr spin 0..0.99; 0 = Schwarzschild fast path
-    pub _pad: [f32; 2],
-    pub cursor: [f32; 4],        // pane-local x/y, strength, absorption
-    pub cursor_motion: [f32; 4], // pane-local velocity x/y, active, unused
+    pub spin_phase: f32,  // continuous visible rotation, radians
+    pub _pad: f32,
+    pub cursor: [f32; 4],         // pane-local x/y, strength, absorption
+    pub cursor_motion: [f32; 4],  // pane-local velocity x/y, active, unused
+    pub absorption_jet: [f32; 4], // progress, batch energy, active, reserved
     pub cursor_trail: [[f32; 4]; CURSOR_TRAIL_SAMPLES], // x/y, age, valid
 }
 
 const MIN_TRASH_SIZE: f32 = 0.0165;
 const DEFAULT_SIZE: f32 = 0.021; // full visible disk is roughly 80 px at 1080p
 const MAX_TRASH_SIZE: f32 = 0.027;
+const DEFAULT_FPS: u32 = 30;
+const GROWTH_DURATION_SEC: f32 = 0.4;
+const ABSORPTION_JET_DURATION_SEC: f32 = 0.9;
 const DEFAULT_DRIFT_SPEED: f32 = 1.0;
 const DEFAULT_DRIFT_X: f32 = 0.20;
 const DEFAULT_DRIFT_Y: f32 = 0.14;
 const PRESET_FADE_SEC: f32 = 1.0; // crossfade time when switching looks
+#[cfg(windows)]
+const OCCLUSION_RADIUS_MULTIPLIER: f64 = 7.5;
+#[cfg(windows)]
+const OCCLUSION_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SizeTier {
+    label: &'static str,
+    threshold: usize,
+    multiplier: f32,
+}
+
+const SIZE_TIERS: [SizeTier; 6] = [
+    SizeTier {
+        label: "图标大小（1.00 倍）",
+        threshold: 0,
+        multiplier: 1.0,
+    },
+    SizeTier {
+        label: "吞噬 1 个（1.25 倍）",
+        threshold: 1,
+        multiplier: 1.25,
+    },
+    SizeTier {
+        label: "吞噬 3 个（1.50 倍）",
+        threshold: 3,
+        multiplier: 1.5,
+    },
+    SizeTier {
+        label: "吞噬 5 个（1.75 倍）",
+        threshold: 5,
+        multiplier: 1.75,
+    },
+    SizeTier {
+        label: "吞噬 10 个（2.00 倍）",
+        threshold: 10,
+        multiplier: 2.0,
+    },
+    SizeTier {
+        label: "吞噬 20 个（4.00 倍）",
+        threshold: 20,
+        multiplier: 4.0,
+    },
+];
+
+fn size_level_for_total(total: usize) -> usize {
+    match total {
+        0 => 0,
+        1..=2 => 1,
+        3..=4 => 2,
+        5..=9 => 3,
+        10..=19 => 4,
+        _ => 5,
+    }
+}
+
+fn size_radius(level: usize) -> f32 {
+    MIN_TRASH_SIZE * SIZE_TIERS[level.min(SIZE_TIERS.len() - 1)].multiplier
+}
+
+fn nearest_size_level(radius: f32) -> usize {
+    SIZE_TIERS
+        .iter()
+        .enumerate()
+        .min_by(|(left, _), (right, _)| {
+            (size_radius(*left) - radius)
+                .abs()
+                .total_cmp(&(size_radius(*right) - radius).abs())
+        })
+        .map(|(level, _)| level)
+        .unwrap_or(0)
+}
+
+fn animated_radius(from: f32, to: f32, elapsed: f32) -> f32 {
+    let x = (elapsed / GROWTH_DURATION_SEC).clamp(0.0, 1.0);
+    let eased = x * x * (3.0 - 2.0 * x);
+    from + (to - from) * eased
+}
+
+fn swallowed_progress_after_success(current: usize, added: usize) -> (usize, usize) {
+    let total = current.saturating_add(added).min(20);
+    (total, size_level_for_total(total))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AbsorptionJet {
+    started_at: std::time::Instant,
+    energy: f32,
+}
+
+impl AbsorptionJet {
+    fn at(count: usize, started_at: std::time::Instant) -> Option<Self> {
+        if count == 0 {
+            return None;
+        }
+        let capped = count.min(20) as f32;
+        let energy = 1.0 + 0.5 * capped.ln() / 20.0_f32.ln();
+        Some(Self { started_at, energy })
+    }
+
+    fn new(count: usize) -> Option<Self> {
+        Self::at(count, std::time::Instant::now())
+    }
+
+    fn uniforms_at(self, now: std::time::Instant) -> [f32; 4] {
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
+        let progress = (elapsed / ABSORPTION_JET_DURATION_SEC).clamp(0.0, 1.0);
+        let active = if elapsed < ABSORPTION_JET_DURATION_SEC {
+            1.0
+        } else {
+            0.0
+        };
+        [progress, self.energy, active, 0.0]
+    }
+}
+
+fn normalize_fps(value: Option<u32>) -> u32 {
+    match value {
+        Some(60) => 60,
+        _ => DEFAULT_FPS,
+    }
+}
+
+fn normalize_always_on_top(value: Option<u32>) -> bool {
+    value == Some(1)
+}
+
+fn spin_angular_velocity(spin: f32) -> f32 {
+    0.9 * spin.clamp(0.0, 0.98).powi(3)
+}
+
+fn advance_spin_phase(phase: f32, spin: f32, direction: f32, elapsed: f32) -> f32 {
+    phase + spin_angular_velocity(spin) * direction.signum() * elapsed.clamp(0.0, 0.25)
+}
+
+fn should_show_overlay(
+    screensaver_wants_visible: bool,
+    always_on_top: bool,
+    black_hole_occluded: bool,
+    pane_ready: bool,
+) -> bool {
+    pane_ready && screensaver_wants_visible && (always_on_top || !black_hole_occluded)
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn fps_option_index(fps: u32) -> usize {
+    usize::from(fps != 30)
+}
 
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
 // its defaults:      temp     incl   roll   inner outer opac  dopp  beam gain contr wind speed expo  star
@@ -167,7 +320,8 @@ struct FileCfg {
     drift_speed: Option<f32>,
     drift_x: Option<f32>,
     drift_y: Option<f32>,
-    fps: Option<u32>,
+    fps: Option<Option<u32>>,
+    always_on_top: Option<u32>,
     idle_minutes: Option<f32>,
     check_updates: Option<u32>,
     pin_x: Option<f32>,
@@ -191,7 +345,8 @@ fn parse_config(text: &str) -> FileCfg {
             "drift_speed" => cfg.drift_speed = v.parse().ok(),
             "drift_x" => cfg.drift_x = v.parse().ok(),
             "drift_y" => cfg.drift_y = v.parse().ok(),
-            "fps" => cfg.fps = v.parse().ok(),
+            "fps" => cfg.fps = Some(v.parse().ok()),
+            "always_on_top" => cfg.always_on_top = v.parse().ok(),
             "idle_minutes" => cfg.idle_minutes = v.parse().ok(),
             "check_updates" => cfg.check_updates = v.parse().ok(),
             "pin_x" => cfg.pin_x = v.parse().ok(),
@@ -225,16 +380,21 @@ const DEFAULT_CONFIG: &str = "\
 #preset = gargantua
 
 # Shadow radius as a fraction of screen height.
-# Tray Small / Medium / Large = 0.011 / 0.014 / 0.018
-#size = 0.014
+# Six size tiers = 0.011 / 0.01375 / 0.0165 / 0.01925 / 0.022 / 0.044
+# Other values snap to the nearest tier.
+#size = 0.011
 
 # Wander speed multiplier and horizontal/vertical range (0 to 0.5).
 #drift_speed = 1.0
 #drift_x = 0.20
 #drift_y = 0.14
 
-# Frame rate cap (saves battery). 0 = uncapped (monitor refresh rate).
-#fps = 0
+# Frame rate cap: 30 or 60. Missing and other values fall back to 30.
+#fps = 30
+
+# Window mode: 0 = hide when an app covers the hole (default),
+# 1 = keep the hole above ordinary windows.
+#always_on_top = 0
 
 # Screensaver mode: appear only after this many minutes without any
 # keyboard/mouse input, and vanish on the first input. 0 = always visible.
@@ -246,7 +406,7 @@ const DEFAULT_CONFIG: &str = "\
 #check_updates = 1
 
 # Placement: drag the black hole directly with the left mouse button.
-# Ctrl+Shift also moves it to the pointer. Tray > Position > Auto drift
+# Double-tap Ctrl to move it to the pointer. Tray > Position > Auto drift
 # resumes wandering.
 # Or pin a fixed spot here (0 to 1, fraction of the combined desktop).
 #pin_x = 0.5
@@ -417,11 +577,18 @@ struct State {
     look_to: [f32; 14],
     fade_start: std::time::Instant,
     hole_radius: f32,
+    hole_radius_from: f32,
+    size_transition_start: std::time::Instant,
+    size_level: usize,
+    swallowed_items: usize,
+    absorption_jet: Option<AbsorptionJet>,
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
-    fps: u32,                                 // 0 = uncapped (vsync only)
-    spin: f32,                                // Kerr spin 0..0.99
+    fps: u32,  // always 30 or 60
+    spin: f32, // Kerr spin 0..0.99
+    spin_phase: f32,
+    last_spin_tick: std::time::Instant,
     idle_minutes: f32, // 0 = always visible; >0 = appear after this much idle
     appear_start: Option<std::time::Instant>, // grow-in animation anchor
     // hole placement in virtual-desktop pixels: the roam box is the bounding
@@ -441,7 +608,7 @@ impl State {
         target: &EventLoopWindowTarget<()>,
         monitors: &[winit::monitor::MonitorHandle],
         selection: Option<usize>, // None = every monitor
-    ) -> State {
+    ) -> Result<State, String> {
         // Windows must be DX12 (the zero-copy capture path shares D3D12
         // textures); macOS is Metal; elsewhere let Vulkan/GL race.
         #[cfg(windows)]
@@ -611,11 +778,18 @@ impl State {
             look_to: PRESETS[DEFAULT_PRESET].1,
             fade_start: std::time::Instant::now(),
             hole_radius: DEFAULT_SIZE,
+            hole_radius_from: DEFAULT_SIZE,
+            size_transition_start: std::time::Instant::now(),
+            size_level: 0,
+            swallowed_items: 0,
+            absorption_jet: None,
             drift_speed: DEFAULT_DRIFT_SPEED,
             drift_x: DEFAULT_DRIFT_X,
             drift_y: DEFAULT_DRIFT_Y,
-            fps: 0,
+            fps: DEFAULT_FPS,
             spin: 0.0,
+            spin_phase: 0.0,
+            last_spin_tick: std::time::Instant::now(),
             idle_minutes: 0.0,
             appear_start: None,
             roam_pos: [0.0, 0.0],
@@ -627,19 +801,25 @@ impl State {
             #[cfg(windows)]
             cursor_snapshot: platform::windows::CursorSnapshot::default(),
         };
-        state.finish_panes(shells);
+        state.finish_panes(shells, "initial setup")?;
         state.update_roam_box();
         state.center_px = [
             state.roam_pos[0] + state.roam_size[0] * 0.5,
             state.roam_pos[1] + state.roam_size[1] * 0.5,
         ];
-        state
+        Ok(state)
     }
 
     /// Turn shells into full panes: configure the surface, create per-pane
     /// resources, start that monitor's capture, then apply the overlay styles
     /// (they must come after the swapchain exists, see main()).
-    fn finish_panes(&mut self, shells: Vec<Shell>) {
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    fn finish_panes(
+        &mut self,
+        shells: Vec<Shell>,
+        exclusion_stage: &'static str,
+    ) -> Result<(), String> {
+        let mut new_panes = Vec::with_capacity(shells.len());
         for shell in shells {
             let Shell {
                 window,
@@ -679,16 +859,21 @@ impl State {
                 monitor_index: mon_index,
                 ..Default::default()
             }));
-            #[cfg(any(windows, target_os = "macos"))]
-            capture::start(shared.clone(), mon_index);
 
             // overlay styles only after the swapchain exists (layered-window
             // rule); the window is still hidden at this point
             let _ = window.set_cursor_hittest(false);
-            #[cfg(any(windows, target_os = "macos"))]
+            #[cfg(windows)]
+            {
+                platform::windows::apply_taskbar_exclusion(&window)
+                    .map_err(|error| error.to_string())?;
+                platform::windows::apply_capture_exclusion(&window, exclusion_stage)
+                    .map_err(|error| error.to_string())?;
+            }
+            #[cfg(target_os = "macos")]
             set_capture_exclusion(&window, true);
 
-            self.panes.push(Pane {
+            new_panes.push(Pane {
                 window,
                 surface,
                 config,
@@ -714,6 +899,12 @@ impl State {
                 gpu_current: None,
             });
         }
+        #[cfg(any(windows, target_os = "macos"))]
+        for pane in &new_panes {
+            capture::start(pane.shared.clone(), pane.mon_index);
+        }
+        self.panes.extend(new_panes);
+        Ok(())
     }
 
     /// The union bounding box of the selected monitors, in virtual pixels.
@@ -741,19 +932,20 @@ impl State {
         target: &EventLoopWindowTarget<()>,
         monitors: &[winit::monitor::MonitorHandle],
         selection: Option<usize>,
-    ) {
+    ) -> Result<(), String> {
         for p in &self.panes {
             // sentinel: tells that pane's capture thread to shut down
             p.shared.lock().unwrap().monitor_index = usize::MAX;
         }
         self.panes.clear();
         let shells = make_shells(&self.instance, target, monitors, selection);
-        self.finish_panes(shells);
+        self.finish_panes(shells, "monitor rebuild")?;
         self.update_roam_box();
         self.center_px = [
             self.roam_pos[0] + self.roam_size[0] * 0.5,
             self.roam_pos[1] + self.roam_size[1] * 0.5,
         ];
+        Ok(())
     }
 
     /// Current look: smoothstep crossfade from look_from to look_to.
@@ -829,19 +1021,13 @@ impl State {
         ]
     }
 
-    /// Advance the hole centre: follow the cursor while the placement hotkey
-    /// is held (pinning where it lands), else glide toward the pin or the
-    /// Lissajous drift path over the whole roam box.
+    /// Advance the hole centre toward its pin or along the Lissajous drift
+    /// path over the whole roam box.
     fn tick_center(&mut self) {
         let now = std::time::Instant::now();
         let dt = (now - self.last_center_tick).as_secs_f32().min(0.1);
         self.last_center_tick = now;
 
-        if place_hotkey_held() {
-            if let Some(p) = self.cursor_px() {
-                self.pinned_px = Some(self.clamp_roam(p));
-            }
-        }
         let target = match self.pinned_px {
             Some(p) => p,
             None => {
@@ -858,6 +1044,16 @@ impl State {
         let k = (1.0 - (-dt * 6.0).exp()) as f64;
         self.center_px[0] += (target[0] - self.center_px[0]) * k;
         self.center_px[1] += (target[1] - self.center_px[1]) * k;
+    }
+
+    fn tick_spin_phase(&mut self) {
+        let now = std::time::Instant::now();
+        let elapsed = now
+            .saturating_duration_since(self.last_spin_tick)
+            .as_secs_f32();
+        self.last_spin_tick = now;
+        let direction = self.current_look()[11];
+        self.spin_phase = advance_spin_phase(self.spin_phase, self.spin, direction, elapsed);
     }
 
     /// Screensaver grow-in: 0 -> 1 over ~2 s after the overlay appears from
@@ -878,6 +1074,49 @@ impl State {
         self.look_from = self.current_look();
         self.look_to = PRESETS[idx].1;
         self.fade_start = std::time::Instant::now();
+    }
+
+    fn current_hole_radius(&self) -> f32 {
+        animated_radius(
+            self.hole_radius_from,
+            self.hole_radius,
+            self.size_transition_start.elapsed().as_secs_f32(),
+        )
+    }
+
+    fn start_size_transition(&mut self, level: usize) {
+        let current = self.current_hole_radius();
+        self.size_level = level.min(SIZE_TIERS.len() - 1);
+        self.hole_radius_from = current;
+        self.hole_radius = size_radius(self.size_level);
+        self.size_transition_start = std::time::Instant::now();
+    }
+
+    fn set_size_level(&mut self, level: usize) {
+        let level = level.min(SIZE_TIERS.len() - 1);
+        self.swallowed_items = SIZE_TIERS[level].threshold;
+        self.start_size_transition(level);
+    }
+
+    fn absorb_successful_items(&mut self, count: usize) -> Option<usize> {
+        let (total, level) = swallowed_progress_after_success(self.swallowed_items, count);
+        self.swallowed_items = total;
+        if level == self.size_level {
+            None
+        } else {
+            self.start_size_transition(level);
+            Some(level)
+        }
+    }
+
+    fn trigger_absorption_jet(&mut self, count: usize) {
+        self.absorption_jet = AbsorptionJet::new(count);
+    }
+
+    fn current_absorption_jet_uniforms(&self) -> [f32; 4] {
+        self.absorption_jet
+            .map(|jet| jet.uniforms_at(std::time::Instant::now()))
+            .unwrap_or([0.0; 4])
     }
 
     fn resize_pane(&mut self, i: usize, new_size: PhysicalSize<u32>) {
@@ -1025,7 +1264,7 @@ impl State {
             look: self.current_look(),
             // the hole keeps one physical size everywhere: radius is relative
             // to the primary monitor's height, rescaled per pane
-            hole_radius: self.hole_radius
+            hole_radius: self.current_hole_radius()
                 * self.appear_factor()
                 * (self.primary_h as f32 / pane.mon_size.height.max(1) as f32),
             center: [
@@ -1035,9 +1274,11 @@ impl State {
                     as f32,
             ],
             spin: self.spin,
-            _pad: [0.0; 2],
+            spin_phase: self.spin_phase,
+            _pad: 0.0,
             cursor,
             cursor_motion,
+            absorption_jet: self.current_absorption_jet_uniforms(),
             cursor_trail,
         }
     }
@@ -1120,17 +1361,19 @@ fn make_shells(
     for i in indices {
         let m = &monitors[i];
         let (pos, size) = (m.position(), m.size());
-        let window = Arc::new(
-            WindowBuilder::new()
-                .with_title("Black Hole Trash")
-                .with_decorations(false)
-                .with_window_level(WindowLevel::AlwaysOnTop)
-                .with_inner_size(size)
-                .with_position(pos)
-                .with_visible(false) // hidden until its first frame is ready
-                .build(target)
-                .unwrap(),
-        );
+        let builder = WindowBuilder::new()
+            .with_title("Black Hole Trash")
+            .with_decorations(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_inner_size(size)
+            .with_position(pos)
+            .with_visible(false); // hidden until its first frame is ready
+        #[cfg(windows)]
+        let builder = {
+            use winit::platform::windows::WindowBuilderExtWindows;
+            builder.with_skip_taskbar(true)
+        };
+        let window = Arc::new(builder.build(target).unwrap());
         let surface = instance.create_surface(window.clone()).unwrap();
         shells.push(Shell {
             window,
@@ -1244,30 +1487,6 @@ fn make_bind_group(
     })
 }
 
-/// Make our overlay window invisible to screen capture (so it doesn't feed
-/// back into the desktop capture). Minimal user32 FFI to avoid pinning a
-/// specific `windows` crate version.
-#[cfg(windows)]
-fn set_capture_exclusion(window: &Window, on: bool) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    const WDA_NONE: u32 = 0x0;
-    const WDA_EXCLUDEFROMCAPTURE: u32 = 0x11;
-    #[link(name = "user32")]
-    extern "system" {
-        fn SetWindowDisplayAffinity(hwnd: isize, dw_affinity: u32) -> i32;
-    }
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            unsafe {
-                SetWindowDisplayAffinity(
-                    h.hwnd.get(),
-                    if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE },
-                );
-            }
-        }
-    }
-}
-
 /// macOS equivalent: NSWindowSharingNone removes the window from all screen
 /// capture (ScreenCaptureKit respects it), preventing self-capture feedback.
 #[cfg(target_os = "macos")]
@@ -1295,34 +1514,6 @@ fn lissa(t: f32) -> [f32; 2] {
         0.75 * (t * 0.37).sin() + 0.25 * (t * 0.83 + 1.0).sin(),
         0.70 * (t * 0.54 + 2.1).sin() + 0.30 * (t * 1.07).sin(),
     ]
-}
-
-/// Placement hotkey: both Ctrl and Shift held, observed globally without
-/// intercepting anything.
-#[cfg(windows)]
-fn place_hotkey_held() -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
-    unsafe {
-        (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0)
-            && (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn place_hotkey_held() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        fn CGEventSourceFlagsState(state: i32) -> u64;
-    }
-    const CTRL: u64 = 0x0004_0000;
-    const SHIFT: u64 = 0x0002_0000;
-    let f = unsafe { CGEventSourceFlagsState(0) }; // combined session state
-    f & CTRL != 0 && f & SHIFT != 0
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn place_hotkey_held() -> bool {
-    false
 }
 
 // ------------------------------ update check -------------------------------
@@ -1530,6 +1721,7 @@ const SPIN_OPTS: [(&str, f32); 4] = [
 struct Tray {
     _icon: tray_icon::TrayIcon,
     menu: tray_icon::menu::Menu,
+    always_on_top: Option<tray_icon::menu::CheckMenuItem>,
     presets: Vec<tray_icon::menu::CheckMenuItem>,
     sizes: Vec<tray_icon::menu::CheckMenuItem>,
     speeds: Vec<tray_icon::menu::CheckMenuItem>,
@@ -1551,12 +1743,27 @@ struct Tray {
 /// AppKit with NSCGSPanic (confirmed on Monterey), and winit only sets up
 /// NSApplication when the loop runs.
 #[cfg(any(windows, target_os = "macos"))]
-fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -> Tray {
+fn build_tray(
+    monitor_labels: &[String],
+    current_monitor: usize,
+    current_size: usize,
+    current_fps: u32,
+    pinned: bool,
+    always_on_top: bool,
+) -> Tray {
     use tray_icon::{
         menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
         Icon, TrayIconBuilder,
     };
     let menu = Menu::new();
+    let always_on_top = if cfg!(windows) {
+        let item = CheckMenuItem::new("始终置顶", true, always_on_top, None);
+        menu.append(&item).unwrap();
+        menu.append(&PredefinedMenuItem::separator()).unwrap();
+        Some(item)
+    } else {
+        None
+    };
     let preset_sub = Submenu::new("类型", true);
     let mut presets: Vec<CheckMenuItem> = Vec::new();
     for (i, (name, _)) in PRESETS.iter().enumerate() {
@@ -1566,7 +1773,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
     }
     menu.append(&preset_sub).unwrap();
     menu.append(&PredefinedMenuItem::separator()).unwrap();
-    // stepped option submenus; default checked = Medium/Normal/Unlimited/Off
+    // stepped option submenus; defaults are supplied by current state
     let sub = |title: &str, names: &[&str], default: usize| -> Vec<CheckMenuItem> {
         let submenu = Submenu::new(title, true);
         let items: Vec<CheckMenuItem> = names
@@ -1618,6 +1825,7 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
     Tray {
         _icon: tray,
         menu,
+        always_on_top,
         presets,
         sizes,
         speeds,
@@ -1632,8 +1840,20 @@ fn build_tray(monitor_labels: &[String], current_monitor: usize, pinned: bool) -
     }
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+fn check_tray_option(items: &[tray_icon::menu::CheckMenuItem], selected: usize) {
+    for (index, item) in items.iter().enumerate() {
+        item.set_checked(index == selected);
+    }
+}
+
 fn main() {
     env_logger::init();
+
+    #[cfg(windows)]
+    if !platform::windows::allow_startup() {
+        return;
+    }
 
     // Single instance with takeover: a second copy would double every
     // overlay, so instead of just refusing to start, a relaunch asks the
@@ -1684,6 +1904,7 @@ fn main() {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|t| parse_config(&t))
         .unwrap_or_default();
+    let mut always_on_top = normalize_always_on_top(startup_cfg.always_on_top);
     let mut cfg_mtime: Option<std::time::SystemTime> = None;
     let mut last_cfg_check = std::time::Instant::now();
     let mut next_frame = std::time::Instant::now();
@@ -1724,14 +1945,23 @@ fn main() {
     #[cfg(any(windows, target_os = "macos"))]
     let mut tray: Option<Tray> = None;
 
-    let mut state = pollster::block_on(State::new(&event_loop, &monitors, current_sel));
+    let mut state = match pollster::block_on(State::new(&event_loop, &monitors, current_sel)) {
+        Ok(state) => state,
+        Err(message) => {
+            #[cfg(windows)]
+            platform::windows::show_capture_exclusion_failure_message(&message);
+            #[cfg(not(windows))]
+            eprintln!("overlay setup failed: {message}");
+            return;
+        }
+    };
 
     // apply the rest of the startup config and make hot-reload diff from it
     if let Some(i) = startup_cfg.preset {
         state.set_preset(i);
     }
     if let Some(v) = startup_cfg.size {
-        state.hole_radius = v.clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
+        state.set_size_level(nearest_size_level(v));
     }
     if let Some(v) = startup_cfg.drift_speed {
         state.drift_speed = v;
@@ -1742,9 +1972,7 @@ fn main() {
     if let Some(v) = startup_cfg.drift_y {
         state.drift_y = v;
     }
-    if let Some(v) = startup_cfg.fps {
-        state.fps = v;
-    }
+    state.fps = normalize_fps(startup_cfg.fps.flatten());
     if let Some(v) = startup_cfg.idle_minutes {
         state.idle_minutes = v;
     }
@@ -1785,7 +2013,19 @@ fn main() {
         }
     };
     #[cfg(windows)]
+    let ctrl_double_tap = match platform::windows::CtrlDoubleTapController::new() {
+        Ok(controller) => Some(controller),
+        Err(error) => {
+            log::error!("double-Ctrl placement unavailable: {error}");
+            None
+        }
+    };
+    #[cfg(windows)]
     let mut active_generation = 0u64;
+    #[cfg(windows)]
+    let mut black_hole_occluded = false;
+    #[cfg(windows)]
+    let mut last_occlusion_check = std::time::Instant::now() - OCCLUSION_CHECK_INTERVAL;
 
     // ui-side trackers for the event loop
     #[cfg_attr(not(any(windows, target_os = "macos")), allow(unused))]
@@ -1837,7 +2077,14 @@ fn main() {
                     None => 0,
                     Some(i) => i + 1,
                 };
-                tray = Some(build_tray(&labels, checked, state.pinned_px.is_some()));
+                tray = Some(build_tray(
+                    &labels,
+                    checked,
+                    state.size_level,
+                    state.fps,
+                    state.pinned_px.is_some(),
+                    always_on_top,
+                ));
             }
         }
         Event::WindowEvent { event, window_id } => {
@@ -1890,7 +2137,19 @@ fn main() {
                     elwt.exit();
                 }
             }
+            #[cfg(windows)]
+            if ctrl_double_tap
+                .as_ref()
+                .is_some_and(|controller| controller.take_triggered())
+            {
+                if let Some(point) = state.cursor_px() {
+                    let pinned = state.clamp_roam(point);
+                    state.center_px = pinned;
+                    state.pinned_px = Some(pinned);
+                }
+            }
             state.tick_center();
+            state.tick_spin_phase();
 
             #[cfg(windows)]
             {
@@ -1920,6 +2179,14 @@ fn main() {
                                     "moved {} item(s) to the Recycle Bin",
                                     result.paths.len()
                                 );
+                                state.trigger_absorption_jet(result.paths.len());
+                                if let Some(level) =
+                                    state.absorb_successful_items(result.paths.len())
+                                {
+                                    if let Some(t) = &tray {
+                                        check_tray_option(&t.sizes, level);
+                                    }
+                                }
                             } else {
                                 log::error!(
                                     "recycle rejected for {} item(s): {}",
@@ -1940,6 +2207,24 @@ fn main() {
                 }
             }
 
+            #[cfg(windows)]
+            if always_on_top {
+                black_hole_occluded = false;
+            } else if last_occlusion_check.elapsed() >= OCCLUSION_CHECK_INTERVAL {
+                last_occlusion_check = std::time::Instant::now();
+                let visible_radius = state.current_hole_radius() as f64
+                    * state.primary_h
+                    * OCCLUSION_RADIUS_MULTIPLIER;
+                black_hole_occluded = platform::windows::is_black_hole_occluded(
+                    state.center_px,
+                    visible_radius,
+                )
+                .unwrap_or_else(|error| {
+                    log::error!("window occlusion check failed: {error}");
+                    true
+                });
+            }
+
             // Visibility state machine, per pane. This must live HERE,
             // not in the render path: a hidden window gets no WM_PAINT,
             // so a render-side reveal would deadlock into invisibility.
@@ -1948,7 +2233,12 @@ fn main() {
             // wanted:  always, or only after idle_minutes without input
             let waited = state.start.elapsed().as_secs_f32();
             let idle_mode = state.idle_minutes > 0.0;
-            let wanted = !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
+            let screensaver_wants_visible =
+                !idle_mode || idle_seconds() >= state.idle_minutes * 60.0;
+            #[cfg(windows)]
+            let occluded = black_hole_occluded;
+            #[cfg(not(windows))]
+            let occluded = false;
             let any_visible = state.panes.iter().any(|p| p.visible);
             for i in 0..state.panes.len() {
                 let ready = { state.panes[i].shared.lock().unwrap().width > 0 };
@@ -1960,7 +2250,8 @@ fn main() {
                              showing test pattern; check 'capture:' messages above"
                     );
                 }
-                let show = wanted && booted;
+                let show =
+                    should_show_overlay(screensaver_wants_visible, always_on_top, occluded, booted);
                 if show && !state.panes[i].visible {
                     if idle_mode && !any_visible {
                         // grow in from nothing when appearing out of idle
@@ -1968,18 +2259,61 @@ fn main() {
                     }
                     state.update_pane(i);
                     let _ = state.render_pane(i); // pre-paint while hidden
-                    let pane = &mut state.panes[i];
-                    pane.window.set_visible(true);
-                    // re-assert overlay traits after the hidden start
-                    pane.window.set_outer_position(pane.mon_pos);
-                    let _ = pane.window.request_inner_size(pane.mon_size);
-                    pane.window.set_window_level(WindowLevel::AlwaysOnTop);
-                    pane.visible = true;
+                    {
+                        let pane = &mut state.panes[i];
+                        #[cfg(not(windows))]
+                        pane.window.set_visible(true);
+                        // re-assert overlay traits after the hidden start
+                        pane.window.set_outer_position(pane.mon_pos);
+                        let _ = pane.window.request_inner_size(pane.mon_size);
+                        pane.window.set_window_level(WindowLevel::AlwaysOnTop);
+                    }
+                    #[cfg(windows)]
+                    if let Err(error) = platform::windows::set_taskbar_excluded_visibility(
+                        &state.panes[i].window,
+                        true,
+                    )
+                    {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_taskbar_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
+                    }
+                    #[cfg(windows)]
+                    if let Err(error) = platform::windows::verify_capture_exclusion(
+                        &state.panes[i].window,
+                        "post-show verification",
+                    ) {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_capture_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
+                    }
+                    state.panes[i].visible = true;
                 } else if !show && state.panes[i].visible {
                     // any input dismisses the screensaver instantly
-                    let pane = &mut state.panes[i];
-                    pane.window.set_visible(false);
-                    pane.visible = false;
+                    #[cfg(windows)]
+                    if let Err(error) = platform::windows::set_taskbar_excluded_visibility(
+                        &state.panes[i].window,
+                        false,
+                    ) {
+                        for pane in &mut state.panes {
+                            pane.window.set_visible(false);
+                            pane.visible = false;
+                        }
+                        platform::windows::show_taskbar_exclusion_failure(&error);
+                        elwt.exit();
+                        return;
+                    }
+                    #[cfg(not(windows))]
+                    state.panes[i].window.set_visible(false);
+                    state.panes[i].visible = false;
                 }
             }
 
@@ -1990,7 +2324,7 @@ fn main() {
                     controller.set_suspended(platform::windows::DropWindow::is_dragging());
                     controller.set_field(
                         state.center_px,
-                        state.hole_radius as f64 * state.primary_h,
+                        state.current_hole_radius() as f64 * state.primary_h,
                         overlay_visible && state.pinned_px.is_some(),
                     );
                     state.cursor_snapshot = controller.snapshot();
@@ -2090,11 +2424,6 @@ fn main() {
                             continue;
                         }
                     }
-                    let check_one = |items: &[tray_icon::menu::CheckMenuItem], idx: usize| {
-                        for (j, it) in items.iter().enumerate() {
-                            it.set_checked(j == idx);
-                        }
-                    };
                     if ev.id == t.quit_id {
                         save_config(&state);
                         elwt.exit();
@@ -2102,6 +2431,21 @@ fn main() {
                         let on = !auto_start_enabled();
                         auto_start_set(on);
                         t.auto_start.set_checked(on);
+                    } else if t
+                        .always_on_top
+                        .as_ref()
+                        .is_some_and(|item| item.id() == &ev.id)
+                    {
+                        always_on_top = !always_on_top;
+                        if let Some(item) = &t.always_on_top {
+                            item.set_checked(always_on_top);
+                        }
+                        #[cfg(windows)]
+                        {
+                            black_hole_occluded = false;
+                            last_occlusion_check =
+                                std::time::Instant::now() - OCCLUSION_CHECK_INTERVAL;
+                        }
                     } else if ev.id == t.open_cfg_id {
                         if let Some(path) = &cfg_path {
                             ensure_config_file(path);
@@ -2115,39 +2459,46 @@ fn main() {
                         }
                     } else if let Some(idx) = t.presets.iter().position(|it| it.id() == &ev.id) {
                         state.set_preset(idx);
-                        check_one(&t.presets, idx);
+                        check_tray_option(&t.presets, idx);
                     } else if let Some(idx) = t.sizes.iter().position(|it| it.id() == &ev.id) {
-                        state.hole_radius = SIZES[idx].1;
-                        check_one(&t.sizes, idx);
+                        state.set_size_level(idx);
+                        check_tray_option(&t.sizes, idx);
                     } else if let Some(idx) = t.speeds.iter().position(|it| it.id() == &ev.id) {
                         state.drift_speed = SPEEDS[idx].1;
-                        check_one(&t.speeds, idx);
+                        check_tray_option(&t.speeds, idx);
                     } else if let Some(idx) = t.fps.iter().position(|it| it.id() == &ev.id) {
                         state.fps = FPS_OPTS[idx].1;
-                        check_one(&t.fps, idx);
+                        check_tray_option(&t.fps, idx);
                     } else if let Some(idx) = t.idles.iter().position(|it| it.id() == &ev.id) {
                         state.idle_minutes = IDLE_OPTS[idx].1;
-                        check_one(&t.idles, idx);
+                        check_tray_option(&t.idles, idx);
                     } else if let Some(idx) = t.spins.iter().position(|it| it.id() == &ev.id) {
                         state.spin = SPIN_OPTS[idx].1;
-                        check_one(&t.spins, idx);
+                        check_tray_option(&t.spins, idx);
                     } else if let Some(idx) = t.positions.iter().position(|it| it.id() == &ev.id) {
                         state.pinned_px = if idx == 1 {
                             Some(state.center_px)
                         } else {
                             None
                         };
-                        check_one(&t.positions, idx);
+                        check_tray_option(&t.positions, idx);
                     } else if let Some(idx) = t.monitors.iter().position(|it| it.id() == &ev.id) {
                         let sel = if idx == 0 { None } else { Some(idx - 1) };
                         if sel != current_sel {
-                            state.set_selection(elwt, &monitors, sel);
+                            if let Err(message) = state.set_selection(elwt, &monitors, sel) {
+                                #[cfg(windows)]
+                                platform::windows::show_capture_exclusion_failure_message(&message);
+                                #[cfg(not(windows))]
+                                eprintln!("overlay setup failed: {message}");
+                                elwt.exit();
+                                return;
+                            }
                             current_sel = sel;
                         }
-                        check_one(&t.monitors, idx);
+                        check_tray_option(&t.monitors, idx);
                     }
                 }
-                // placement hotkey pins the hole; mirror that in the menu
+                // The placement gesture pins the hole; mirror that in the menu.
                 let now_pinned = state.pinned_px.is_some();
                 if now_pinned != tray_pinned_ui {
                     tray_pinned_ui = now_pinned;
@@ -2180,10 +2531,13 @@ fn main() {
                                     }
                                 }
                                 if cfg.size != prev_cfg.size {
-                                    state.hole_radius = cfg
-                                        .size
-                                        .unwrap_or(DEFAULT_SIZE)
-                                        .clamp(MIN_TRASH_SIZE, MAX_TRASH_SIZE);
+                                    let level =
+                                        cfg.size.map(nearest_size_level).unwrap_or_default();
+                                    state.set_size_level(level);
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(t) = &tray {
+                                        check_tray_option(&t.sizes, level);
+                                    }
                                 }
                                 if cfg.drift_speed != prev_cfg.drift_speed {
                                     state.drift_speed =
@@ -2196,7 +2550,30 @@ fn main() {
                                     state.drift_y = cfg.drift_y.unwrap_or(DEFAULT_DRIFT_Y);
                                 }
                                 if cfg.fps != prev_cfg.fps {
-                                    state.fps = cfg.fps.unwrap_or(0);
+                                    state.fps = normalize_fps(cfg.fps.flatten());
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(t) = &tray {
+                                        check_tray_option(
+                                            &t.fps,
+                                            fps_option_index(state.fps),
+                                        );
+                                    }
+                                }
+                                if cfg.always_on_top != prev_cfg.always_on_top {
+                                    always_on_top =
+                                        normalize_always_on_top(cfg.always_on_top);
+                                    #[cfg(any(windows, target_os = "macos"))]
+                                    if let Some(item) =
+                                        tray.as_ref().and_then(|t| t.always_on_top.as_ref())
+                                    {
+                                        item.set_checked(always_on_top);
+                                    }
+                                    #[cfg(windows)]
+                                    {
+                                        black_hole_occluded = false;
+                                        last_occlusion_check = std::time::Instant::now()
+                                            - OCCLUSION_CHECK_INTERVAL;
+                                    }
                                 }
                                 if cfg.idle_minutes != prev_cfg.idle_minutes {
                                     state.idle_minutes = cfg.idle_minutes.unwrap_or(0.0);
@@ -2222,7 +2599,18 @@ fn main() {
                                 if cfg.monitor != prev_cfg.monitor {
                                     let sel = sel_from_cfg(cfg.monitor);
                                     if sel != current_sel {
-                                        state.set_selection(elwt, &monitors, sel);
+                                        if let Err(message) =
+                                            state.set_selection(elwt, &monitors, sel)
+                                        {
+                                            #[cfg(windows)]
+                                            platform::windows::show_capture_exclusion_failure_message(
+                                                &message,
+                                            );
+                                            #[cfg(not(windows))]
+                                            eprintln!("overlay setup failed: {message}");
+                                            elwt.exit();
+                                            return;
+                                        }
                                         current_sel = sel;
                                         #[cfg(any(windows, target_os = "macos"))]
                                         if let Some(t) = &tray {
@@ -2243,19 +2631,17 @@ fn main() {
                 }
             }
 
-            // frame pacing: hidden -> low-power 0.5s idle polling (no
-            // rendering at all); uncapped -> vsync-bound Poll; capped ->
-            // wake at the next frame deadline (saves battery)
+            // Frame pacing: hidden -> low-power 0.5s idle polling (no
+            // rendering); visible -> wake at the next 30/60 FPS deadline.
             let visible = state.panes.iter().any(|p| p.visible);
             if !visible {
+                #[cfg(windows)]
+                let hidden_wait = OCCLUSION_CHECK_INTERVAL;
+                #[cfg(not(windows))]
+                let hidden_wait = std::time::Duration::from_millis(500);
                 elwt.set_control_flow(ControlFlow::WaitUntil(
-                    std::time::Instant::now() + std::time::Duration::from_millis(500),
+                    std::time::Instant::now() + hidden_wait,
                 ));
-            } else if state.fps == 0 {
-                for p in state.panes.iter().filter(|p| p.visible) {
-                    p.window.request_redraw();
-                }
-                elwt.set_control_flow(ControlFlow::Poll);
             } else {
                 let now = std::time::Instant::now();
                 if now >= next_frame {
@@ -2270,4 +2656,247 @@ fn main() {
         _ => {}
     });
     run_result.unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.000_001,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn size_growth_uses_requested_swallowed_item_thresholds() {
+        let cases = [
+            (0, 0),
+            (1, 1),
+            (2, 1),
+            (3, 2),
+            (4, 2),
+            (5, 3),
+            (9, 3),
+            (10, 4),
+            (19, 4),
+            (20, 5),
+            (usize::MAX, 5),
+        ];
+        for (total, expected) in cases {
+            assert_eq!(size_level_for_total(total), expected);
+        }
+    }
+
+    #[test]
+    fn size_growth_has_six_requested_radii() {
+        assert_eq!(SIZE_TIERS.len(), 6);
+        for (level, multiplier) in [1.0, 1.25, 1.5, 1.75, 2.0, 4.0].into_iter().enumerate() {
+            assert_close(size_radius(level), MIN_TRASH_SIZE * multiplier);
+        }
+    }
+
+    #[test]
+    fn size_growth_snaps_legacy_config_to_nearest_tier() {
+        assert_eq!(nearest_size_level(0.011), 0);
+        assert_eq!(nearest_size_level(0.014), 1);
+        assert_eq!(nearest_size_level(0.018), 3);
+        assert_eq!(nearest_size_level(1.0), 5);
+    }
+
+    #[test]
+    fn size_growth_animation_uses_smooth_four_tenths_transition() {
+        assert_close(animated_radius(1.0, 2.0, 0.0), 1.0);
+        assert_close(animated_radius(1.0, 2.0, 0.2), 1.5);
+        assert_close(animated_radius(1.0, 2.0, 0.4), 2.0);
+        assert_close(animated_radius(1.0, 2.0, 2.0), 2.0);
+    }
+
+    #[test]
+    fn swallowed_progress_caps_at_twenty_without_overflow() {
+        assert_eq!(swallowed_progress_after_success(5, 8), (13, 4));
+        assert_eq!(swallowed_progress_after_success(19, usize::MAX), (20, 5));
+    }
+
+    #[test]
+    fn swallowed_progress_crosses_multiple_tiers_directly() {
+        assert_eq!(swallowed_progress_after_success(0, 20), (20, 5));
+    }
+
+    #[test]
+    fn swallowed_progress_manual_tiers_have_matching_start_counts() {
+        assert_eq!(SIZE_TIERS.map(|tier| tier.threshold), [0, 1, 3, 5, 10, 20]);
+    }
+
+    #[test]
+    fn absorption_jet_energy_scales_logarithmically_and_caps_at_twenty() {
+        assert_eq!(AbsorptionJet::at(0, std::time::Instant::now()), None);
+        assert_close(
+            AbsorptionJet::at(1, std::time::Instant::now())
+                .expect("one item should trigger a jet")
+                .energy,
+            1.0,
+        );
+        let two = AbsorptionJet::at(2, std::time::Instant::now())
+            .expect("two items should trigger a jet")
+            .energy;
+        assert!(two > 1.0 && two < 1.5);
+        assert_close(
+            AbsorptionJet::at(20, std::time::Instant::now())
+                .expect("twenty items should trigger a jet")
+                .energy,
+            1.5,
+        );
+        assert_close(
+            AbsorptionJet::at(usize::MAX, std::time::Instant::now())
+                .expect("large batches should still trigger a jet")
+                .energy,
+            1.5,
+        );
+    }
+
+    #[test]
+    fn absorption_jet_uniforms_cover_start_midpoint_and_completion() {
+        let started_at = std::time::Instant::now();
+        let jet = AbsorptionJet::at(1, started_at).expect("jet");
+        assert_eq!(jet.uniforms_at(started_at), [0.0, 1.0, 1.0, 0.0]);
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_millis(450)),
+            [0.5, 1.0, 1.0, 0.0],
+        );
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_millis(900)),
+            [1.0, 1.0, 0.0, 0.0],
+        );
+        assert_eq!(
+            jet.uniforms_at(started_at + std::time::Duration::from_secs(2)),
+            [1.0, 1.0, 0.0, 0.0],
+        );
+    }
+
+    #[test]
+    fn absorption_jet_uniform_payload_is_one_aligned_vec4() {
+        let started_at = std::time::Instant::now();
+        let jet = AbsorptionJet::at(3, started_at).expect("jet");
+        let payload = jet.uniforms_at(started_at);
+        assert_eq!(payload.len(), 4);
+        assert_eq!(payload[2], 1.0);
+        assert_eq!(std::mem::size_of_val(&payload), 16);
+        let uniforms = Uniforms {
+            resolution: [1.0, 1.0],
+            time: 0.0,
+            has_desktop: 0.0,
+            look: [0.0; 14],
+            hole_radius: 0.01,
+            center: [0.5, 0.5],
+            spin: 0.0,
+            spin_phase: 0.0,
+            _pad: 0.0,
+            cursor: [0.0; 4],
+            cursor_motion: [0.0; 4],
+            absorption_jet: payload,
+            cursor_trail: [[0.0; 4]; CURSOR_TRAIL_SAMPLES],
+        };
+        assert_eq!(uniforms.absorption_jet, payload);
+    }
+
+    #[test]
+    fn shader_composites_absorption_jet_in_both_output_paths() {
+        let shader = include_str!("black_hole_trash.wgsl");
+        assert!(shader.contains("absorption_jet: vec4<f32>"));
+        assert!(shader.contains("fn absorption_jet_overlay("));
+        assert_eq!(shader.matches("absorption_jet_overlay(").count(), 3);
+    }
+
+    #[test]
+    fn shader_uses_continuous_spin_phase_for_lens_and_disk_motion() {
+        let shader = include_str!("black_hole_trash.wgsl");
+        assert!(shader.contains("spin_phase: f32"));
+        assert!(shader.contains("fn drag_twist(b_rs: f32, spin_signed: f32, spin_phase: f32)"));
+        assert_eq!(shader.matches("drag_twist(").count(), 3);
+        assert_eq!(shader.matches("u.spin_phase").count(), 3);
+        assert!(shader.contains("- u.spin_phase"));
+    }
+
+    #[test]
+    fn tray_labels_are_chinese() {
+        let labels = PRESETS
+            .iter()
+            .map(|preset| preset.0)
+            .chain(SIZE_TIERS.iter().map(|tier| tier.label))
+            .chain(SPEEDS.iter().map(|option| option.0))
+            .chain(FPS_OPTS.iter().map(|option| option.0))
+            .chain(IDLE_OPTS.iter().map(|option| option.0))
+            .chain(SPIN_OPTS.iter().map(|option| option.0));
+        for label in labels {
+            assert!(
+                label
+                    .chars()
+                    .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
+                "tray label is not Chinese: {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn fps_policy_only_allows_thirty_or_sixty() {
+        assert_eq!(FPS_OPTS, [("30", 30), ("60", 60), ("不限", 0)]);
+        assert_eq!(DEFAULT_FPS, 30);
+        assert_eq!(normalize_fps(None), 30);
+        assert_eq!(normalize_fps(Some(0)), 30);
+        assert_eq!(normalize_fps(Some(30)), 30);
+        assert_eq!(normalize_fps(Some(60)), 60);
+        assert_eq!(normalize_fps(Some(120)), 30);
+        assert_eq!(fps_option_index(30), 0);
+        assert_eq!(fps_option_index(60), 1);
+    }
+
+    #[test]
+    fn fps_config_distinguishes_absent_invalid_and_valid_values() {
+        assert_eq!(parse_config("").fps, None);
+        assert_eq!(parse_config("fps = -1").fps, Some(None));
+        assert_eq!(parse_config("fps = nope").fps, Some(None));
+        assert_eq!(parse_config("fps = 30").fps, Some(Some(30)));
+        assert_eq!(parse_config("fps = 60").fps, Some(Some(60)));
+    }
+
+    #[test]
+    fn spin_phase_stops_accelerates_reverses_and_caps_long_frame_gaps() {
+        assert_close(spin_angular_velocity(0.0), 0.0);
+        let medium = spin_angular_velocity(0.6);
+        let high = spin_angular_velocity(0.9);
+        let extreme = spin_angular_velocity(0.98);
+        assert!(medium > 0.0);
+        assert!(medium < high);
+        assert!(high < extreme);
+
+        assert_close(advance_spin_phase(1.25, 0.0, 1.0, 0.1), 1.25);
+        assert_close(advance_spin_phase(0.0, 0.9, -1.0, 0.1), -high * 0.1);
+        assert_close(
+            advance_spin_phase(0.0, 0.9, 1.0, 5.0),
+            advance_spin_phase(0.0, 0.9, 1.0, 0.25),
+        );
+    }
+
+    #[test]
+    fn always_on_top_defaults_off_and_only_one_enables_it() {
+        assert_eq!(parse_config("").always_on_top, None);
+        assert_eq!(parse_config("always_on_top = 0").always_on_top, Some(0));
+        assert_eq!(parse_config("always_on_top = 1").always_on_top, Some(1));
+        assert_eq!(parse_config("always_on_top = nope").always_on_top, None);
+        assert!(!normalize_always_on_top(None));
+        assert!(!normalize_always_on_top(Some(0)));
+        assert!(normalize_always_on_top(Some(1)));
+        assert!(!normalize_always_on_top(Some(2)));
+    }
+
+    #[test]
+    fn visibility_policy_respects_occlusion_unless_always_on_top() {
+        assert!(should_show_overlay(true, false, false, true));
+        assert!(!should_show_overlay(true, false, true, true));
+        assert!(should_show_overlay(true, true, true, true));
+        assert!(!should_show_overlay(false, true, false, true));
+        assert!(!should_show_overlay(true, true, false, false));
+    }
 }
