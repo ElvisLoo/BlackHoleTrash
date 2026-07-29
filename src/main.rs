@@ -1036,6 +1036,7 @@ impl State {
         self.last_center_tick = now;
 
         if self.random_jump {
+            // Blink cycle: fade in → slow drift ~10s → fade out → wait 3s → repeat
             self.blink_timer = (self.blink_timer - dt).max(0.0);
             if self.blink_timer <= 0.0 {
                 let hash = |n: f64| -> f64 {
@@ -1044,6 +1045,7 @@ impl State {
                 };
                 let t = self.start.elapsed().as_secs_f64();
                 if self.blink_phase < 0.5 {
+                    // Disappeared → teleport to new position → appear
                     self.blink_phase = 1.0;
                     let mx = self.roam_size[0] * 0.15;
                     let my = self.roam_size[1] * 0.15;
@@ -1051,24 +1053,29 @@ impl State {
                         self.roam_pos[0] + mx + hash(t * 1.3) * (self.roam_size[0] - mx * 2.0),
                         self.roam_pos[1] + my + hash(t * 2.7 + 5.0) * (self.roam_size[1] - my * 2.0),
                     ]);
-                    self.blink_timer = (2.0 + hash(t * 0.7) * 4.0) as f32;
+                    self.blink_timer = 1.0; // fade in duration
                 } else {
+                    // Visible → fade out
                     self.blink_phase = 0.0;
-                    self.blink_timer = (0.8 + hash(t * 1.1) * 1.2) as f32;
+                    self.blink_timer = 1.0; // fade out duration
                 }
             } else if self.blink_phase > 0.5 {
-                let t = self.start.elapsed().as_secs_f64();
-                let hash = |n: f64| -> f64 {
-                    let x = (n * 12.9898 + 78.233).sin() * 43758.5453;
-                    x - x.floor()
-                };
-                let rx = hash(t * 0.07) * 2.0 - 1.0;
-                let ry = hash(t * 0.11 + 1.7) * 2.0 - 1.0;
-                let noise = 2.0 * (t * 0.5).sin().abs() + 0.5;
-                let step = 120.0 * self.drift_speed as f64 * noise * dt as f64;
-                self.center_px[0] += rx * step;
-                self.center_px[1] += ry * step;
-                self.center_px = self.clamp_roam(self.center_px);
+                // Visible: slow Lissajous drift (same as normal drift but slower)
+                let t = self.start.elapsed().as_secs_f32() * 0.06 * self.drift_speed;
+                let l = lissa(t);
+                let target = [
+                    self.roam_pos[0]
+                        + self.roam_size[0] * (0.5 + l[0] as f64 * self.drift_x as f64 * 0.3),
+                    self.roam_pos[1]
+                        + self.roam_size[1] * (0.5 + l[1] as f64 * self.drift_y as f64 * 0.3),
+                ];
+                let k = (1.0 - (-dt * 2.0).exp()) as f64;
+                self.center_px[0] += (target[0] - self.center_px[0]) * k;
+                self.center_px[1] += (target[1] - self.center_px[1]) * k;
+                // Stay visible for roughly 10 seconds total
+                if self.blink_timer < 9.0 {
+                    self.blink_timer = 9.0;
+                }
             }
             return;
         }

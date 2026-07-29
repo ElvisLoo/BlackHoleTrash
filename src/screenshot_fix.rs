@@ -22,6 +22,7 @@ use windows::Win32::System::Memory::{
 };
 
 const CF_DIB: u32 = 8;
+const CF_DIBV5: u32 = 17;
 
 /// What the compositor needs to know about one pane.
 pub struct PaneShot {
@@ -87,9 +88,6 @@ fn parse_dib(bytes: Vec<u8>) -> Option<Dib> {
 }
 
 fn clipboard_dib() -> Option<Vec<u8>> {
-    // The producer (snipping tool, or whatever wrote the clipboard) may
-    // still hold it or be mid-write when the sequence number ticks, so a
-    // couple of short retries make the first attempt reliable.
     for attempt in 0..3 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(120));
@@ -99,16 +97,19 @@ fn clipboard_dib() -> Option<Vec<u8>> {
                 continue;
             }
             let out = (|| {
-                let h: HANDLE = GetClipboardData(CF_DIB).ok()?;
-                let hg = HGLOBAL(h.0);
-                let ptr = GlobalLock(hg) as *const u8;
-                if ptr.is_null() {
-                    return None;
+                for &fmt in &[CF_DIB, CF_DIBV5] {
+                    if let Ok(h) = GetClipboardData(fmt) {
+                        let hg = HGLOBAL(h.0);
+                        let ptr = GlobalLock(hg) as *const u8;
+                        if !ptr.is_null() {
+                            let len = GlobalSize(hg);
+                            let data = std::slice::from_raw_parts(ptr, len).to_vec();
+                            let _ = GlobalUnlock(hg);
+                            return Some(data);
+                        }
+                    }
                 }
-                let len = GlobalSize(hg);
-                let data = std::slice::from_raw_parts(ptr, len).to_vec();
-                let _ = GlobalUnlock(hg);
-                Some(data)
+                None
             })();
             let _ = CloseClipboard();
             out
