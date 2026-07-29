@@ -16,6 +16,13 @@ macOS 版本可参考并下载：[ZGhey/blackhole-mac](https://github.com/ZGhey/
 
 安装包按当前用户安装，不需要管理员权限。安装包尚未进行代码签名，Windows SmartScreen 可能显示安全提醒；可在同一 Release 页面下载 `.sha256` 文件核对完整性。
 
+## 演示视频
+
+<video src="assets/demo.mp4" controls preload="metadata" width="720">
+  您的浏览器不支持内嵌视频播放。
+</video>
+<p><a href="assets/demo.mp4">下载演示视频</a></p>
+
 ## 当前功能
 
 - **真实回收站拖放**：通过 Windows OLE `IDropTarget` 接收文件、文件夹和多项目拖放，使用 `IFileOperation + FOFX_RECYCLEONDELETE` 送入回收站。
