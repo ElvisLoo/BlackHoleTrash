@@ -432,7 +432,7 @@ const DEFAULT_CONFIG: &str = "\
 
 #[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 /// Save current state to the config file so it persists across restarts.
-fn save_config(state: &State) {
+fn save_config(state: &State, always_on_top: bool) {
     let Some(path) = config_path() else { return };
     let preset_idx = PRESETS.iter().position(|p| p.1 == state.look_to);
     let preset_key = preset_idx.and_then(|i| PRESET_KEYS.get(i)).copied();
@@ -474,6 +474,7 @@ fn save_config(state: &State) {
         lines.push(format!("pin_x = {:.4}", x));
         lines.push(format!("pin_y = {:.4}", pin_y.unwrap_or(0.5)));
     }
+    lines.push(if always_on_top { "always_on_top = 1" } else { "always_on_top = 0" }.to_string());
     lines.push("check_updates = 1".to_string());
     lines.push("fix_screenshots = 1".to_string());
     let _ = std::fs::write(&path, lines.join("\n"));
@@ -598,6 +599,9 @@ struct State {
     primary_h: f64, // hole size reference so it stays constant across panes
     center_px: [f64; 2],
     pinned_px: Option<[f64; 2]>,
+    random_jump: bool,
+    blink_phase: f32,
+    blink_timer: f32,
     last_center_tick: std::time::Instant,
     #[cfg(windows)]
     cursor_snapshot: platform::windows::CursorSnapshot,
@@ -797,6 +801,9 @@ impl State {
             primary_h,
             center_px: [0.0, 0.0],
             pinned_px: None,
+            random_jump: false,
+            blink_phase: 1.0,
+            blink_timer: 0.0,
             last_center_tick: std::time::Instant::now(),
             #[cfg(windows)]
             cursor_snapshot: platform::windows::CursorSnapshot::default(),
@@ -1028,6 +1035,44 @@ impl State {
         let dt = (now - self.last_center_tick).as_secs_f32().min(0.1);
         self.last_center_tick = now;
 
+        if self.random_jump {
+            self.blink_timer = (self.blink_timer - dt).max(0.0);
+            if self.blink_timer <= 0.0 {
+                let hash = |n: f64| -> f64 {
+                    let x = (n * 12.9898 + 78.233).sin() * 43758.5453;
+                    x - x.floor()
+                };
+                let t = self.start.elapsed().as_secs_f64();
+                if self.blink_phase < 0.5 {
+                    self.blink_phase = 1.0;
+                    let mx = self.roam_size[0] * 0.15;
+                    let my = self.roam_size[1] * 0.15;
+                    self.center_px = self.clamp_roam([
+                        self.roam_pos[0] + mx + hash(t * 1.3) * (self.roam_size[0] - mx * 2.0),
+                        self.roam_pos[1] + my + hash(t * 2.7 + 5.0) * (self.roam_size[1] - my * 2.0),
+                    ]);
+                    self.blink_timer = (2.0 + hash(t * 0.7) * 4.0) as f32;
+                } else {
+                    self.blink_phase = 0.0;
+                    self.blink_timer = (0.8 + hash(t * 1.1) * 1.2) as f32;
+                }
+            } else if self.blink_phase > 0.5 {
+                let t = self.start.elapsed().as_secs_f64();
+                let hash = |n: f64| -> f64 {
+                    let x = (n * 12.9898 + 78.233).sin() * 43758.5453;
+                    x - x.floor()
+                };
+                let rx = hash(t * 0.07) * 2.0 - 1.0;
+                let ry = hash(t * 0.11 + 1.7) * 2.0 - 1.0;
+                let noise = 2.0 * (t * 0.5).sin().abs() + 0.5;
+                let step = 120.0 * self.drift_speed as f64 * noise * dt as f64;
+                self.center_px[0] += rx * step;
+                self.center_px[1] += ry * step;
+                self.center_px = self.clamp_roam(self.center_px);
+            }
+            return;
+        }
+
         let target = match self.pinned_px {
             Some(p) => p,
             None => {
@@ -1059,12 +1104,20 @@ impl State {
     /// Screensaver grow-in: 0 -> 1 over ~2 s after the overlay appears from
     /// idle, so the hole swells out of nothing instead of popping in.
     fn appear_factor(&self) -> f32 {
-        match self.appear_start {
+        let base = match self.appear_start {
             Some(t0) => {
                 let x = (t0.elapsed().as_secs_f32() / 2.0).min(1.0);
                 x * x * (3.0 - 2.0 * x)
             }
             None => 1.0,
+        };
+        if self.random_jump {
+            // Smooth blink: 0 = invisible, 1 = fully visible
+            let blink = self.blink_phase;
+            let smooth = blink * blink * (3.0 - 2.0 * blink); // smoothstep
+            base * smooth
+        } else {
+            base
         }
     }
 
@@ -1750,6 +1803,7 @@ fn build_tray(
     current_fps: u32,
     pinned: bool,
     always_on_top: bool,
+    random_jump: bool,
 ) -> Tray {
     use tray_icon::{
         menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -1792,10 +1846,10 @@ fn build_tray(
     let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), 2);
     let idles = sub("屏保", &IDLE_OPTS.map(|s| s.0), 0);
     let spins = sub("自旋", &SPIN_OPTS.map(|s| s.0), 0);
-    let positions = sub(
+let positions = sub(
         "位置",
-        &["自动漂移", "固定 (Ctrl+Shift 放置)"],
-        if pinned { 1 } else { 0 },
+        &["自动漂移", "固定 (Ctrl+Shift 放置)", "布朗运动"],
+        if random_jump { 2 } else if pinned { 1 } else { 0 },
     );
     let monitors = if monitor_labels.len() > 1 {
         let labels: Vec<&str> = monitor_labels.iter().map(|s| s.as_str()).collect();
@@ -2084,6 +2138,7 @@ fn main() {
                     state.fps,
                     state.pinned_px.is_some(),
                     always_on_top,
+                    state.random_jump,
                 ));
             }
         }
@@ -2093,7 +2148,7 @@ fn main() {
             };
             match event {
                 WindowEvent::CloseRequested => {
-                    save_config(&state);
+                    save_config(&state, always_on_top);
                     elwt.exit();
                 }
                 WindowEvent::KeyboardInput {
@@ -2105,7 +2160,7 @@ fn main() {
                         },
                     ..
                 } => {
-                    save_config(&state);
+                    save_config(&state, always_on_top);
                     elwt.exit();
                 }
                 WindowEvent::Resized(new_size) => state.resize_pane(i, new_size),
@@ -2133,7 +2188,7 @@ fn main() {
                 use windows::Win32::System::Threading::WaitForSingleObject;
                 if unsafe { WaitForSingleObject(HANDLE(quit_event as *mut _), 0) }.0 == 0 {
                     eprintln!("handover requested by a newer launch; exiting");
-                    save_config(&state);
+                    save_config(&state, always_on_top);
                     elwt.exit();
                 }
             }
@@ -2350,7 +2405,12 @@ fn main() {
                 if seq != last_clip_seq {
                     last_clip_seq = seq;
                     let recent = last_prtscn.is_some_and(|t| t.elapsed().as_secs_f32() < 10.0);
-                    if fix_screenshots && recent && state.panes.iter().any(|p| p.visible) {
+                    // Always try to fix if the clipboard DIB matches virtual desktop size,
+                    // even without a prior PrintScreen keypress (Windows 11 Snipping Tool etc.)
+                    let can_fix = fix_screenshots
+                        && (recent || state.panes.iter().any(|p| p.visible))
+                        && state.panes.iter().any(|p| p.visible);
+                    if can_fix {
                         let shots: Vec<screenshot_fix::PaneShot> = state
                             .panes
                             .iter()
@@ -2425,7 +2485,7 @@ fn main() {
                         }
                     }
                     if ev.id == t.quit_id {
-                        save_config(&state);
+                        save_config(&state, always_on_top);
                         elwt.exit();
                     } else if ev.id == t.auto_start.id() {
                         let on = !auto_start_enabled();
@@ -2481,6 +2541,11 @@ fn main() {
                         } else {
                             None
                         };
+                        state.random_jump = idx == 2;
+                        if idx == 2 {
+                            state.blink_phase = 0.0;
+                            state.blink_timer = 0.8;
+                        }
                         check_tray_option(&t.positions, idx);
                     } else if let Some(idx) = t.monitors.iter().position(|it| it.id() == &ev.id) {
                         let sel = if idx == 0 { None } else { Some(idx - 1) };
