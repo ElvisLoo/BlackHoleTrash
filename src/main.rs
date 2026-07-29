@@ -2331,7 +2331,7 @@ fn main() {
                 }
                 if let Some(window) = &mut drop_window {
                     window.set_center(state.center_px);
-                    window.set_enabled(state.pinned_px.is_some() && overlay_visible);
+                    window.set_enabled(overlay_visible);
                 }
             }
 

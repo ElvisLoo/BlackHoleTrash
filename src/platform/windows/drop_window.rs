@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOPMOST, WS_POPUP,
 };
 
-const WINDOW_SIZE: i32 = 88;
+const WINDOW_SIZE: i32 = 128;
 static EVENT_SENDER: OnceLock<EventSender> = OnceLock::new();
 static DRAG_OFFSET: Mutex<Option<[i32; 2]>> = Mutex::new(None);
 static WIDGET_DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
