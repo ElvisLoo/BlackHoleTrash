@@ -16,6 +16,13 @@ For the macOS version, see [ZGhey/blackhole-mac](https://github.com/ZGhey/blackh
 
 The per-user installer requires no administrator privileges. It is currently unsigned, so Windows SmartScreen may display a warning. Use the `.sha256` asset on the same Release page to verify the download.
 
+## Demo Video
+
+<video src="assets/demo.mp4" controls preload="metadata" width="720">
+  Your browser does not support inline video playback.
+</video>
+<p><a href="assets/demo.mp4">Download the demo video</a></p>
+
 ## Current Features
 
 - **Real Recycle Bin drops**: Windows OLE `IDropTarget` accepts Explorer files, folders, and multi-item drops, then recycles them through `IFileOperation + FOFX_RECYCLEONDELETE`.
