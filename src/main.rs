@@ -236,7 +236,27 @@ fn should_show_overlay(
 
 #[cfg(any(windows, target_os = "macos"))]
 fn fps_option_index(fps: u32) -> usize {
-    usize::from(fps != 30)
+    // 之前是 usize::from(fps != 30)，把 60 和 0（不限）都映射到索引 1，
+    // 于是选「不限」时托盘勾的是「60」，热重载后勾选状态和实际值对不上。
+    match fps {
+        30 => 0,
+        60 => 1,
+        _ => 2,
+    }
+}
+
+/// 一帧的间隔。`fps == 0` 表示不限帧率。
+///
+/// 直接写 `1.0 / fps as f64` 在 fps=0 时得到 inf，
+/// `Duration::from_secs_f64(inf)` 会 panic（或得到一个永不触发的时间点），
+/// 结果是选「不限」后画面直接卡死。这里给一个 1ms 的下限，
+/// 既能跑到接近显示器刷新率，又不会把事件循环打满。
+fn frame_interval(fps: u32) -> std::time::Duration {
+    if fps == 0 {
+        std::time::Duration::from_millis(1)
+    } else {
+        std::time::Duration::from_secs_f64(1.0 / fps as f64)
+    }
 }
 
 // The 8 looks from the original's tuner (ParamSpec.swift), resolved against
@@ -2740,7 +2760,7 @@ fn main() {
             } else {
                 let now = std::time::Instant::now();
                 if now >= next_frame {
-                    next_frame = now + std::time::Duration::from_secs_f64(1.0 / state.fps as f64);
+                    next_frame = now + frame_interval(state.fps);
                     for p in state.panes.iter().filter(|p| p.visible) {
                         p.window.request_redraw();
                     }
@@ -2781,6 +2801,37 @@ mod tests {
         ];
         for (total, expected) in cases {
             assert_eq!(size_level_for_total(total), expected);
+        }
+    }
+
+    #[test]
+    fn frame_interval_never_panics_on_uncapped() {
+        // 回归：fps=0（不限）时 1.0/0.0 = inf，Duration::from_secs_f64(inf) 会 panic。
+        // 用户一选「不限」画面就卡死。
+        let d = frame_interval(0);
+        assert!(d.as_millis() >= 1, "不限帧率也要有最小间隔，否则打满事件循环");
+
+        let d30 = frame_interval(30);
+        assert!((d30.as_secs_f64() - 1.0 / 30.0).abs() < 1e-6);
+
+        let d60 = frame_interval(60);
+        assert!((d60.as_secs_f64() - 1.0 / 60.0).abs() < 1e-6);
+
+        // 极端值也不能 panic
+        let _ = frame_interval(1);
+        let _ = frame_interval(1000);
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "macos"))]
+    fn fps_menu_index_matches_each_option() {
+        // 回归：原来 60 和 0 都返回 1，选「不限」时托盘勾的是「60」
+        assert_eq!(fps_option_index(30), 0);
+        assert_eq!(fps_option_index(60), 1);
+        assert_eq!(fps_option_index(0), 2);
+        // 每一档都要落在合法下标内
+        for (i, (_, fps)) in FPS_OPTS.iter().enumerate() {
+            assert_eq!(fps_option_index(*fps), i, "fps={fps} 的菜单下标错了");
         }
     }
 
