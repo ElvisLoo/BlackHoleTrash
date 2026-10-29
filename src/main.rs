@@ -475,8 +475,14 @@ fn save_config(state: &State, always_on_top: bool) {
         lines.push(format!("pin_y = {:.4}", pin_y.unwrap_or(0.5)));
     }
     lines.push(if always_on_top { "always_on_top = 1" } else { "always_on_top = 0" }.to_string());
-    lines.push("check_updates = 1".to_string());
-    lines.push("fix_screenshots = 1".to_string());
+    lines.push(format!(
+        "check_updates = {}",
+        u32::from(state.check_updates)
+    ));
+    lines.push(format!(
+        "fix_screenshots = {}",
+        u32::from(state.fix_screenshots)
+    ));
     let _ = std::fs::write(&path, lines.join("\n"));
 }
 
@@ -586,7 +592,12 @@ struct State {
     drift_speed: f32,
     drift_x: f32,
     drift_y: f32,
-    fps: u32,  // always 30 or 60
+    fps: u32,  // 30 / 60, or 0 for uncapped
+    // 这两个开关来自配置文件，之前 save_config 里被写死成 1，
+    // 导致用户设成 0 之后每次退出又被改回来 —— 等于开关不生效。
+    // 存在 State 上，退出时原样写回。
+    check_updates: bool,
+    fix_screenshots: bool,
     spin: f32, // Kerr spin 0..0.99
     spin_phase: f32,
     last_spin_tick: std::time::Instant,
@@ -612,6 +623,8 @@ impl State {
         target: &EventLoopWindowTarget<()>,
         monitors: &[winit::monitor::MonitorHandle],
         selection: Option<usize>, // None = every monitor
+        check_updates: bool,
+        fix_screenshots: bool,
     ) -> Result<State, String> {
         // Windows must be DX12 (the zero-copy capture path shares D3D12
         // textures); macOS is Metal; elsewhere let Vulkan/GL race.
@@ -791,6 +804,8 @@ impl State {
             drift_x: DEFAULT_DRIFT_X,
             drift_y: DEFAULT_DRIFT_Y,
             fps: DEFAULT_FPS,
+            check_updates,
+            fix_screenshots,
             spin: 0.0,
             spin_phase: 0.0,
             last_spin_tick: std::time::Instant::now(),
@@ -2006,7 +2021,15 @@ fn main() {
     #[cfg(any(windows, target_os = "macos"))]
     let mut tray: Option<Tray> = None;
 
-    let mut state = match pollster::block_on(State::new(&event_loop, &monitors, current_sel)) {
+    let check_updates = startup_cfg.check_updates.unwrap_or(1) != 0;
+    let fix_screenshots = startup_cfg.fix_screenshots.unwrap_or(1) != 0;
+    let mut state = match pollster::block_on(State::new(
+        &event_loop,
+        &monitors,
+        current_sel,
+        check_updates,
+        fix_screenshots,
+    )) {
         Ok(state) => state,
         Err(message) => {
             #[cfg(windows)]
@@ -2759,6 +2782,29 @@ mod tests {
         for (total, expected) in cases {
             assert_eq!(size_level_for_total(total), expected);
         }
+    }
+
+    #[test]
+    fn config_roundtrip_preserves_opt_out_switches() {
+        // 回归：save_config 曾把 check_updates / fix_screenshots 写死成 1，
+        // 用户设成 0 后每次退出又被改回来，等于开关永远关不掉。
+        // 这里直接验证「写回的值必须还是用户选的那个」。
+        let cfg = parse_config("check_updates = 0
+fix_screenshots = 0
+");
+        assert_eq!(cfg.check_updates, Some(0));
+        assert_eq!(cfg.fix_screenshots, Some(0));
+
+        let on = parse_config("check_updates = 1
+fix_screenshots = 1
+");
+        assert_eq!(on.check_updates, Some(1));
+        assert_eq!(on.fix_screenshots, Some(1));
+
+        // 缺省时应回落到开启（与 unwrap_or(1) 的语义一致）
+        let empty = parse_config("");
+        assert_eq!(empty.check_updates, None);
+        assert_eq!(empty.fix_screenshots, None);
     }
 
     #[test]
