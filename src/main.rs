@@ -691,7 +691,16 @@ impl State {
                         force_fallback_adapter: false,
                     })
                     .await
-                    .expect("no suitable GPU adapter"),
+                    .unwrap_or_else(|| {
+                        const MSG: &str = concat!(
+                            "找不到可用的显卡适配器。\n\n",
+                            "请尝试：重启电脑、更新显卡驱动、",
+                            "或退出占用显卡的程序后重试。"
+                        );
+                        eprintln!("render: {MSG}");
+                        report_startup_failure(MSG);
+                        std::process::exit(1);
+                    }),
             }
         };
         #[cfg(not(windows))]
@@ -702,11 +711,27 @@ impl State {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("no suitable GPU adapter");
+            .unwrap_or_else(|| {
+                const MSG: &str = "找不到可用的显卡适配器。请更新显卡驱动或重启后重试。";
+                eprintln!("render: {MSG}");
+                report_startup_failure(MSG);
+                std::process::exit(1);
+            });
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
-            .expect("failed to create device");
+            .unwrap_or_else(|e| {
+                let msg = format!(
+                    concat!(
+                        "无法创建 GPU 设备：{e}\n\n",
+                        "常见原因：显卡驱动版本过旧、或显存被其它程序占满。\n",
+                        "请更新驱动后重启本程序。"
+                    )
+                );
+                eprintln!("render: {msg}");
+                report_startup_failure(&msg);
+                std::process::exit(1);
+            });
 
         // one pipeline for all panes; the format is the first surface's
         // preference (universally Bgra8UnormSrgb on Windows/macOS)
@@ -1943,6 +1968,49 @@ fn check_tray_option(items: &[tray_icon::menu::CheckMenuItem], selected: usize) 
     }
 }
 
+/// 启动失败时的可见提示。
+///
+/// 为什么需要它：这是个托盘/桌面类程序，用户双击 exe。
+/// 驱动异常、远程桌面、显卡被独占时 wgpu 会拿不到 adapter，
+/// 原来直接 panic —— 控制台一闪而过（打包成 GUI 程序后连控制台都没有），
+/// 用户看到的就是「双击没反应」，也不会去翻日志。
+/// 弹一个框，至少能让他知道发生了什么、该找谁。
+#[cfg(windows)]
+fn report_startup_failure(msg: &str) {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    let title = HSTRING::from("黑洞垃圾桶 启动失败");
+    let body = HSTRING::from(msg);
+    unsafe {
+        MessageBoxW(None, &body, &title, MB_OK | MB_ICONERROR);
+    }
+}
+
+#[cfg(not(windows))]
+fn report_startup_failure(msg: &str) {
+    eprintln!("启动失败: {msg}");
+}
+
+/// 启动后 3 秒仍抓不到屏幕画面时的提示。
+///
+/// 单独成函数是因为它和「启动失败」不同：程序在跑，黑洞也在，
+/// 只是透出来的是测试图案而不是桌面。用户分不清这是 bug 还是效果，
+/// 而实际上这种情况通常能从驱动或录屏软件冲突里找到原因。
+fn report_capture_degraded(waited: f32) {
+    // 用 concat! 而不是续行反斜杠：多行字面量里的续行符很容易被编辑器或
+    // 格式化工具吃掉，一旦丢了就变成字符串里裸换行，编译器直接报错。
+    let msg = concat!(
+        "启动 {:.0} 秒仍未抓到屏幕画面，当前显示的是测试图案。\n\n",
+        "可能原因：\n",
+        "· 显卡驱动不支持 DWM 捕获（老驱动、部分集显）\n",
+        "· 有其它录屏 / 直播软件正在独占捕获通道\n",
+        "· 正在远程桌面会话中"
+    );
+    eprintln!("{msg}", waited);
+    // 这里不弹窗：程序还能用，弹窗会挡住桌面，反而更烦。
+    // 托盘菜单里能看到状态，日志里也有完整原因。
+}
+
 fn main() {
     env_logger::init();
 
@@ -2006,7 +2074,25 @@ fn main() {
     let mut next_frame = std::time::Instant::now();
     let mut boot_warned = false;
 
-    let event_loop = EventLoop::new().unwrap();
+    // 不用 unwrap：远程桌面会话、驱动崩溃恢复中、被组策略限制的机器上
+    // 建不出事件循环，unwrap 会让进程直接 abort，连日志都留不下完整上下文。
+    let event_loop = match EventLoop::new() {
+        Ok(el) => el,
+        Err(e) => {
+            let msg = format!(
+                concat!(
+                    "无法初始化窗口系统：{e}\n\n",
+                    "常见原因：\n",
+                    "· 正在用远程桌面（RDP）连接，部分显卡驱动不支持\n",
+                    "· 显卡驱动异常，尝试重启或更新驱动\n",
+                    "· 显卡被其它独占全屏程序占用"
+                )
+            );
+            eprintln!("启动失败: {msg}");
+            report_startup_failure(&msg);
+            return;
+        }
+    };
     let monitors: Vec<_> = event_loop.available_monitors().collect();
 
     // monitor selection: 0 or absent = all monitors (the hole roams across
@@ -2350,10 +2436,14 @@ fn main() {
                 let booted = ready || waited > 3.0;
                 if booted && !ready && !boot_warned {
                     boot_warned = true;
+                    // 抓不到帧时界面会显示测试图案（花纹），
+                    // 用户会以为「程序坏了」或者「这就是效果」。
+                    // 明确说一句：这是降级显示，正常应该透出桌面。
                     eprintln!(
                         "warning: no capture frame after {waited:.1}s - \
                              showing test pattern; check 'capture:' messages above"
                     );
+                    report_capture_degraded(waited);
                 }
                 let show =
                     should_show_overlay(screensaver_wants_visible, always_on_top, occluded, booted);
