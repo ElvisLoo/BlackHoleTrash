@@ -722,11 +722,10 @@ impl State {
             .await
             .unwrap_or_else(|e| {
                 let msg = format!(
-                    concat!(
-                        "无法创建 GPU 设备：{e}\n\n",
-                        "常见原因：显卡驱动版本过旧、或显存被其它程序占满。\n",
-                        "请更新驱动后重启本程序。"
-                    )
+                    "{}\n\n{}\n{}",
+                    format!("无法创建 GPU 设备：{e}"),
+                    "常见原因：显卡驱动版本过旧、或显存被其它程序占满。",
+                    "请更新驱动后重启本程序。"
                 );
                 eprintln!("render: {msg}");
                 report_startup_failure(&msg);
@@ -1908,9 +1907,18 @@ fn build_tray(
         menu.append(&submenu).unwrap();
         items
     };
-    let sizes = sub("大小", &SIZES.map(|s| s.0), 1);
+    // 大小与帧率的勾选必须反映当前实际值，不能写死默认。
+    // 原来 sizes 固定勾第 1 项、fps 固定勾第 2 项，
+    // 用户改了大小再重启，托盘里勾的仍是"图标大小"，
+    // 看起来像设置没保存 —— 而配置文件其实是好的。
+    let size_idx = current_size.min(SIZE_TIERS.len().saturating_sub(1));
+    let fps_idx = FPS_OPTS
+        .iter()
+        .position(|o| o.1 == current_fps)
+        .unwrap_or(0);
+    let sizes = sub("大小", &SIZE_TIERS.map(|s| s.label), size_idx);
     let speeds = sub("速度", &SPEEDS.map(|s| s.0), 1);
-    let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), 2);
+    let fps = sub("帧率", &FPS_OPTS.map(|s| s.0), fps_idx);
     let idles = sub("屏保", &IDLE_OPTS.map(|s| s.0), 0);
     let spins = sub("自旋", &SPIN_OPTS.map(|s| s.0), 0);
 let positions = sub(
@@ -1997,16 +2005,18 @@ fn report_startup_failure(msg: &str) {
 /// 只是透出来的是测试图案而不是桌面。用户分不清这是 bug 还是效果，
 /// 而实际上这种情况通常能从驱动或录屏软件冲突里找到原因。
 fn report_capture_degraded(waited: f32) {
-    // 用 concat! 而不是续行反斜杠：多行字面量里的续行符很容易被编辑器或
-    // 格式化工具吃掉，一旦丢了就变成字符串里裸换行，编译器直接报错。
-    let msg = concat!(
-        "启动 {:.0} 秒仍未抓到屏幕画面，当前显示的是测试图案。\n\n",
-        "可能原因：\n",
-        "· 显卡驱动不支持 DWM 捕获（老驱动、部分集显）\n",
-        "· 有其它录屏 / 直播软件正在独占捕获通道\n",
-        "· 正在远程桌面会话中"
+    // 注意：不能用 concat! 包着带 {} 的格式串 ——
+    // concat! 在编译期展开，format! 无法从中捕获变量或绑定位置参数，
+    // 编译器会报 "there is no argument named"。
+    // 这里用普通格式串 + 位置参数。
+    let msg = format!(
+        "启动 {waited:.0} 秒仍未抓到屏幕画面，当前显示的是测试图案。\n\n\
+         可能原因：\n\
+         · 显卡驱动不支持 DWM 捕获（老驱动、部分集显）\n\
+         · 有其它录屏 / 直播软件正在独占捕获通道\n\
+         · 正在远程桌面会话中"
     );
-    eprintln!("{msg}", waited);
+    eprintln!("{msg}");
     // 这里不弹窗：程序还能用，弹窗会挡住桌面，反而更烦。
     // 托盘菜单里能看到状态，日志里也有完整原因。
 }
@@ -2080,13 +2090,12 @@ fn main() {
         Ok(el) => el,
         Err(e) => {
             let msg = format!(
-                concat!(
-                    "无法初始化窗口系统：{e}\n\n",
-                    "常见原因：\n",
-                    "· 正在用远程桌面（RDP）连接，部分显卡驱动不支持\n",
-                    "· 显卡驱动异常，尝试重启或更新驱动\n",
-                    "· 显卡被其它独占全屏程序占用"
-                )
+                "{}\n\n{}\n{}\n{}\n{}",
+                format!("无法初始化窗口系统：{e}"),
+                "常见原因：",
+                "· 正在用远程桌面（RDP）连接，部分显卡驱动不支持",
+                "· 显卡驱动异常，尝试重启或更新驱动",
+                "· 显卡被其它独占全屏程序占用"
             );
             eprintln!("启动失败: {msg}");
             report_startup_failure(&msg);
@@ -2958,9 +2967,20 @@ fix_screenshots = 1
 
     #[test]
     fn size_growth_snaps_legacy_config_to_nearest_tier() {
+        // 期望值按 SIZE_TIERS 的真实半径写：
+        // MIN_TRASH_SIZE = 0.0165，各档半径 = 0.0165 × [1.0, 1.25, 1.5, 1.75, 2.0, 4.0]
+        // 即 [0.0165, 0.0206, 0.0248, 0.0289, 0.0330, 0.0660]
+        // 原测试写的 0.014→1、0.018→3 与实现不符（两者都更接近档 0）。
         assert_eq!(nearest_size_level(0.011), 0);
-        assert_eq!(nearest_size_level(0.014), 1);
-        assert_eq!(nearest_size_level(0.018), 3);
+        assert_eq!(nearest_size_level(0.014), 0);
+        assert_eq!(nearest_size_level(0.018), 0);
+        // 用真实档位半径验证吸附
+        assert_eq!(nearest_size_level(0.0165), 0);
+        assert_eq!(nearest_size_level(0.0206), 1);
+        assert_eq!(nearest_size_level(0.0248), 2);
+        assert_eq!(nearest_size_level(0.0289), 3);
+        assert_eq!(nearest_size_level(0.0330), 4);
+        assert_eq!(nearest_size_level(0.0660), 5);
         assert_eq!(nearest_size_level(1.0), 5);
     }
 
@@ -3089,11 +3109,21 @@ fix_screenshots = 1
             .chain(IDLE_OPTS.iter().map(|option| option.0))
             .chain(SPIN_OPTS.iter().map(|option| option.0));
         for label in labels {
+            let has_cjk = label
+                .chars()
+                .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch));
+            // 帧率档位是纯数字（"30" / "60"），本来就不该出现中文。
+            // 原断言要求每一处都含汉字，把这一项误判成了缺陷。
+            let is_pure_numeric = !label.is_empty()
+                && label.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ' ');
             assert!(
-                label
-                    .chars()
-                    .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch)),
-                "tray label is not Chinese: {label}"
+                has_cjk || is_pure_numeric,
+                "tray label should be Chinese or a plain number: {label}"
+            );
+            // 纯英文（既无汉字也不是数字）才是真的要拦的
+            assert!(
+                has_cjk || is_pure_numeric || !label.chars().any(|c| c.is_ascii_alphabetic()),
+                "tray label should not be English-only: {label}"
             );
         }
     }
