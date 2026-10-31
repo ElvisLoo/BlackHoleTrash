@@ -8,6 +8,26 @@
 
 Black Hole Trash 是一个小巧、可拖动的 Windows 桌面黑洞，也是一个真正的回收站入口。它用实时引力透镜扭曲桌面，把文件、文件夹或多个项目安全送入 Windows 回收站，而不是永久删除。
 
+## 从源码构建
+
+需要 Rust + MinGW（GNU 目标）。Windows 上一条命令装齐：
+
+```powershell
+winget install Rustlang.Rustup BrechtSanders.WinLibs.POSIX.UCRT
+```
+
+然后：
+
+```bash
+./build.sh check    # 类型检查
+./build.sh test     # 测试（49 项）
+./build.sh build    # 出 exe
+```
+
+脚本会自己找 MinGW 和 MSVC 的路径。手动构建时必须保证 MSVC 的 `link.exe`
+排在 Git 自带的 `/usr/bin/link` 之前，否则会出现
+`link: extra operand` 这种看起来毫不相关的报错。
+
 ## 下载 v1.4.0
 
 [下载 BlackHoleTrash.exe](https://github.com/ElvisLoo/BlackHoleTrash/releases/download/v1.4.0-elvis/BlackHoleTrash.exe) · [查看 Release](https://github.com/ElvisLoo/BlackHoleTrash/releases/tag/v1.4.0-elvis)
