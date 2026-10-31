@@ -53,6 +53,7 @@ cargo test                         # 必须过
 | 写盘失败静默 | `save_config` | 只读目录下保存一直失败但无提示 |
 | 选「不限」帧率卡死 | `frame_interval` | `1.0/0.0 = inf` → `from_secs_f64(inf)` panic |
 | 托盘勾选错位 | `fps_option_index` | 60 与 0 都映射到索引 1 |
+| 启动期失败无提示 | `EventLoop::new` / `request_adapter` / `request_device` | 三处 `expect`/`unwrap` 改为 MessageBox 提示 + exit(1)；GUI 程序没有控制台，原来双击就是「没反应」 |
 
 **如果上游日后自己修了同样的问题**，合并时优先用上游实现，删掉我们的版本，
 并从本表移除对应行 —— 避免同一处逻辑维护两份。
@@ -63,7 +64,7 @@ cargo test                         # 必须过
 
 | 问题 | 位置 | 影响 |
 |---|---|---|
-| 启动期 `unwrap` 无提示 | `EventLoop::new().unwrap()`、`request_adapter` 等 | 驱动异常/远程桌面下双击毫无反应 |
+| ~~启动期 `unwrap` 无提示~~ | ~~`EventLoop::new().unwrap()`、`request_adapter` 等~~ | **已修**（见下方「已修」表） |
 | 提权后拖放必然失效 | UIPI 限制 | 管理员用户拖文件没反应，且无提示 |
 | 多显示器只按第一块屏协商格式 | `surface_capabilities` | 副屏可能黑屏（待验证） |
 | 捕获线程不 join | `capture_windows.rs` | 切换显示器后线程短暂堆积 |
