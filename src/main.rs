@@ -82,7 +82,8 @@ pub struct Uniforms {
 
 const MIN_TRASH_SIZE: f32 = 0.0165;
 const DEFAULT_SIZE: f32 = 0.021; // full visible disk is roughly 80 px at 1080p
-const MAX_TRASH_SIZE: f32 = 0.027;
+// 注：原来的 MAX_TRASH_SIZE 随三档大小方案一起废弃了。
+// 现在用 SIZE_TIERS 的六档（最大 4.0 倍），上限由 size_radius(5) 决定。
 const DEFAULT_FPS: u32 = 30;
 const GROWTH_DURATION_SEC: f32 = 0.4;
 const ABSORPTION_JET_DURATION_SEC: f32 = 0.9;
@@ -1811,12 +1812,8 @@ fn tray_icon_rgba(size: u32) -> Vec<u8> {
 }
 
 // sub-option values, shared by the tray menu and its handler
-#[cfg(any(windows, target_os = "macos"))]
-const SIZES: [(&str, f32); 3] = [
-    ("小", MIN_TRASH_SIZE),
-    ("中", DEFAULT_SIZE),
-    ("大", MAX_TRASH_SIZE),
-];
+// 注：原来的 SIZES（小/中/大三档）已由 SIZE_TIERS 的六档取代。
+// 留着不删会被编译器的 dead_code 警告一直点名，也容易让人以为还有两套大小体系。
 #[cfg(any(windows, target_os = "macos"))]
 const SPEEDS: [(&str, f32); 3] = [("慢", 0.4), ("正常", 1.0), ("快", 2.2)];
 #[cfg(any(windows, target_os = "macos"))]
